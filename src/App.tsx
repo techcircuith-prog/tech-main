@@ -4,7 +4,6 @@ import {
   ArrowRight,
   ArrowUpRight,
   Activity,
-  ClipboardList,
   BriefcaseBusiness,
   Bell,
   Bookmark,
@@ -38,6 +37,32 @@ import {
   UserCog,
   LogOut,
   X,
+  Search,
+  Plus,
+  Trash2,
+  Edit,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  TrendingUp,
+  CheckCircle2,
+  AlertCircle,
+  Lock,
+  Mail,
+  Building2,
+  Building,
+  User as UserIcon,
+  Phone,
+  Home,
+  Package,
+  PackageCheck,
+  Copy,
+  Printer,
+  Download,
+  Truck,
+  CreditCard,
+  ChevronUp,
+  Wrench,
 } from "lucide-react";
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import brandLogo from "../ece logo 1.png";
@@ -66,29 +91,151 @@ const STUDENT_INTERESTS = [
 ] as const;
 const ACADEMIC_YEARS = ["1st year", "2nd year", "3rd year", "4th year", "Final year", "Postgraduate", "Other"] as const;
 
-type CheckoutCustomer = {
+function sanitizeCourse(raw: unknown): string {
+  if (!raw) return "";
+  let val = String(raw).trim();
+  val = val.replace(/<[^>]*>/g, "");
+  val = val
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+  if ((val.startsWith("[") && val.endsWith("]")) || (val.startsWith("{") && val.endsWith("}"))) {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) {
+        val = parsed.filter(Boolean).map(String).join(", ");
+      } else if (typeof parsed === "object" && parsed !== null) {
+        val = String(parsed.course || parsed.name || parsed.title || "");
+      }
+    } catch {
+      val = val.replace(/^[\[{\s"']+|[\]}\s"']+$/g, "");
+    }
+  }
+  val = val.replace(/^["'\[]+|["'\]]+$/g, "").trim();
+  if (/^(null|undefined|\[object Object\]|NaN)$/i.test(val)) return "";
+  return val;
+}
+
+function isOpportunityEnded(item: { title: string; summary: string; isExpired?: boolean }): boolean {
+  if (item.isExpired) return true;
+  const text = `${item.title} ${item.summary}`.toLowerCase();
+  if (
+    text.includes("have passed") ||
+    text.includes("has passed") ||
+    text.includes("dates have passed") ||
+    text.includes("deadline reportedly passed") ||
+    text.includes("registration reportedly closed") ||
+    text.includes("filter=past")
+  ) {
+    return true;
+  }
+  const match = text.match(/(\d{1,2})\s*(?:–|-|\/)?\s*(?:\d{1,2})?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*(202\d)/i);
+  if (match) {
+    const day = parseInt(match[1], 10);
+    const monthStr = match[2].toLowerCase();
+    const year = parseInt(match[3], 10);
+    const months: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+    const eventDate = new Date(year, months[monthStr], day);
+    const now = new Date(2026, 9, 20);
+    if (eventDate < now) return true;
+  }
+  return false;
+}
+
+export type CheckoutCustomer = {
   name: string;
   email: string;
   phone: string;
 };
 
-type CheckoutOrderResponse = {
+export type CheckoutOrderResponse = {
   order_id: string;
   payment_session_id: string;
   gateway_mode: "sandbox" | "production";
 };
 
-type CashfreeCheckoutResult = {
-  error?: { message?: string };
-} | void;
+export interface CashfreeComponent {
+  mount(selector: string): void;
+  destroy?(): void;
+  on?(event: string, callback: (data: unknown) => void): void;
+  isComplete?(): boolean;
+  data?(): { value: unknown };
+}
 
-type CashfreeCheckout = {
-  checkout(options: { paymentSessionId: string; redirectTarget: "_self" }): Promise<CashfreeCheckoutResult>;
-};
+export interface CashfreeInstance {
+  create(
+    componentName:
+      | "cardNumber"
+      | "cardHolder"
+      | "cardExpiry"
+      | "cardCvv"
+      | "savePaymentInstrument"
+      | "upiCollect"
+      | "upiQr"
+      | "upiApp",
+    options?: {
+      values?: Record<string, string>;
+      style?: Record<string, unknown>;
+      classes?: Record<string, string>;
+      fonts?: unknown[];
+    }
+  ): CashfreeComponent;
+  pay(options: {
+    paymentMethod: unknown;
+    paymentSessionId: string;
+    savePaymentInstrument?: boolean | CashfreeComponent;
+    redirectTarget?: string;
+  }): Promise<{
+    error?: { message?: string; code?: string; description?: string };
+    paymentDetails?: unknown;
+    redirect?: boolean;
+    paymentMessage?: string;
+  }>;
+}
+
+export interface RazorpayResponse {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+}
+
+export interface RazorpayOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id?: string;
+  prefill?: {
+    name?: string;
+    email?: string;
+    contact?: string;
+    method?: "card" | "upi";
+  };
+  notes?: Record<string, string>;
+  theme?: {
+    color?: string;
+  };
+  handler?: (response: RazorpayResponse) => void;
+  modal?: {
+    ondismiss?: () => void;
+    escape?: boolean;
+    backdropclose?: boolean;
+  };
+}
+
+export interface RazorpayInstance {
+  open(): void;
+  on(event: string, handler: (response: unknown) => void): void;
+}
 
 declare global {
   interface Window {
-    Cashfree?: (options: { mode: "sandbox" | "production" }) => CashfreeCheckout;
+    Cashfree?: (options: { mode: "sandbox" | "production" }) => CashfreeInstance;
+    Razorpay?: new (options: RazorpayOptions) => RazorpayInstance;
   }
 }
 
@@ -109,17 +256,93 @@ type Page =
   | "Dashboard"
   | "Admin";
 
-type StudentDashboardSection = "overview" | "applications" | "notifications" | "profile" | "settings";
+type StudentDashboardSection = "overview" | "applications" | "orders" | "notifications" | "profile" | "settings";
 type StudentMenuDestination = StudentDashboardSection | "bookmarks";
 
 const studentMenuItems = [
   { id: "overview", label: "Student dashboard", icon: GraduationCap },
+  { id: "orders", label: "My Orders & Tracking", icon: PackageCheck },
   { id: "applications", label: "My Applications & Enrollments", icon: FileText },
   { id: "bookmarks", label: "Bookmarks / Wishlist", icon: Bookmark },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "profile", label: "My Profile", icon: UserRound },
   { id: "settings", label: "Settings & Support", icon: Settings },
 ] satisfies { id: StudentMenuDestination; label: string; icon: typeof FileText }[];
+
+type OrderTrackingStage =
+  | "Order Placed"
+  | "Confirmed"
+  | "Building (Processing)"
+  | "Testing / Quality Check"
+  | "Packed"
+  | "Shipped"
+  | "Delivered"
+  | "Cancelled"
+  | "Refunded";
+
+interface OrderStatusHistory {
+  id: string;
+  order_id: string;
+  from_stage: string | null;
+  to_stage: OrderTrackingStage;
+  changed_by: string;
+  changed_by_name?: string;
+  note?: string;
+  is_public: boolean;
+  changed_at: string;
+}
+
+interface OrderItem {
+  project_id: string;
+  title: string;
+  price: number;
+  qty: number;
+}
+
+interface AdminOrder {
+  id: string;
+  order_id?: string;
+  order_number: string;
+  user_id?: string | null;
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string;
+  customer?: {
+    name: string;
+    email: string;
+    phone: string;
+    college?: string;
+  };
+  shipping_address: {
+    addressLine1: string;
+    addressLine2?: string;
+    city: string;
+    state: string;
+    pincode: string;
+  };
+  items: OrderItem[];
+  subtotal: number;
+  shipping_charges: number;
+  total_amount: number;
+  currency: string;
+  payment_method: string;
+  payment_gateway: string;
+  cashfree_order_id?: string;
+  payment_session_id?: string;
+  payment_id?: string;
+  payment_status: "PENDING" | "PAID" | "FAILED" | "CANCELLED";
+  tracking_status: OrderTrackingStage;
+  paid_at?: string | null;
+  expected_delivery_date?: string | null;
+  courier_name?: string;
+  courier_tracking_number?: string;
+  courier_tracking_url?: string;
+  admin_notes?: string;
+  public_notes?: string;
+  status_history?: OrderStatusHistory[];
+  created_at: string;
+  updated_at: string;
+}
 
 type Listing = {
   id: string;
@@ -217,15 +440,6 @@ function isTrackableOpportunity(listing: Listing): listing is TrackableOpportuni
   return Boolean(listing.sourceUrl) && ["Internships", "Training", "Hackathons"].includes(listing.kind);
 }
 
-const listingKinds: Listing["kind"][] = [
-  "Manufacturing",
-  "PCB Design",
-  "Internships",
-  "Training",
-  "Products",
-  "Projects",
-  "Hackathons",
-];
 
 const projectImageUrls = import.meta.glob<string>("../Our Project image/ece *.png", {
   eager: true,
@@ -342,8 +556,8 @@ const projectListings: Listing[] = projectGroups.flatMap((group, groupIndex) =>
       id: `sample-project-${imageNumber}`,
       kind: "Projects",
       title,
-      organization: "Student project concept",
-      city: "Research concept",
+      organization: "TechCircuit Hardware Kit",
+      city: "Ready to ship · All India",
       summary: group.summary,
       tags: [...group.tags],
       components: [...group.components],
@@ -667,21 +881,34 @@ const emptyMessages: Partial<Record<Page, { title: string; text: string }>> = {
   },
 };
 
+const FALLBACK_SUPABASE_URL = "https://zomwoprlbydezbbliyui.supabase.co";
+const FALLBACK_SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvbXdvcHJsYnlkZXpiYmxpeXVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4OTQ0MTEsImV4cCI6MjEwNzQ3MDQxMX0.ZsmboSVX_kN4J79tIbZBIbdFMIOijyhfqcayAbGHlt4";
+
 let supabaseClient: SupabaseClient | null | undefined;
 
 function getSupabase(): SupabaseClient | null {
   if (supabaseClient !== undefined) return supabaseClient;
-  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+  const url = ((import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim()) || FALLBACK_SUPABASE_URL;
+  const key = ((import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim()) || FALLBACK_SUPABASE_ANON_KEY;
   supabaseClient = url && key ? createClient(url, key) : null;
   return supabaseClient;
 }
 
 function App() {
-  const [paymentOrderId] = useState(() => new URLSearchParams(window.location.search).get("payment_order_id") ?? "");
+  const [returnOrderId] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("cf_order_id") || params.get("order_id") || params.get("payment_order_id") || null;
+  });
+  const [activeTrackingOrder, setActiveTrackingOrder] = useState<AdminOrder | null>(null);
+  const [returnConfirmedOrder, setReturnConfirmedOrder] = useState<AdminOrder | null>(null);
   const [page, setPage] = useState<Page>(() => {
     if (window.location.pathname.replace(/\/+$/, "") === "/admin") return "Admin";
-    return paymentOrderId ? "PaymentResult" : "Home";
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("cf_order_id") || params.get("order_id") || params.get("payment_order_id")) {
+      return "Checkout";
+    }
+    return "Home";
   });
   const [city, setCity] = useState("All locations");
   const [savedIds, setSavedIds] = useState<string[]>(() => {
@@ -709,8 +936,10 @@ function App() {
   const [studentSection, setStudentSection] = useState<StudentDashboardSection>("overview");
   const [remoteListings, setRemoteListings] = useState<Listing[]>([]);
   const [dataError, setDataError] = useState("");
-  const [student, setStudent] = useState<User | null>(null);
-  const [authOpen, setAuthOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [userRole, setUserRole] = useState<"admin" | "student" | null>(null);
+  const student = userRole === "student" ? currentUser : null;
+  const [authOpen, setAuthOpen] = useState(() => ["/login", "/signin", "/student-login", "/auth"].includes(window.location.pathname.replace(/\/+$/, "")));
   const [authRecovery, setAuthRecovery] = useState(false);
   const [pendingOpportunityPrompt, setPendingOpportunityPrompt] = useState<Listing | null>(null);
   const [opportunityActivitySaving, setOpportunityActivitySaving] = useState(false);
@@ -718,17 +947,97 @@ function App() {
   const [opportunityActivityRevision, setOpportunityActivityRevision] = useState(0);
   const opportunityPromptCheckInProgress = useRef(false);
 
+  async function resolveUserRole(client: SupabaseClient, user: User | null): Promise<"admin" | "student" | null> {
+    if (!user) {
+      setCurrentUser(null);
+      setUserRole(null);
+      return null;
+    }
+    setCurrentUser(user);
+    try {
+      const { data, error } = await client
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (error || !data) {
+        setUserRole("student");
+        return "student";
+      }
+      const role = data.role === "admin" ? "admin" : "student";
+      setUserRole(role);
+      return role;
+    } catch {
+      setUserRole("student");
+      return "student";
+    }
+  }
+
+  async function handleSignOut() {
+    const supabase = getSupabase();
+    if (supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Continue clearing local auth state
+      }
+    }
+    setCurrentUser(null);
+    setUserRole(null);
+    setStudentMenuOpen(false);
+    navigate("Home");
+  }
+
   useEffect(() => {
     function restoreRoute() {
       const path = window.location.pathname.replace(/\/+$/, "");
-      setPage(path === "/admin"
-        ? "Admin"
-        : new URLSearchParams(window.location.search).has("payment_order_id") ? "PaymentResult" : "Home");
+      if (path === "/admin") {
+        setPage("Admin");
+      } else if (["/login", "/signin", "/student-login", "/auth"].includes(path)) {
+        setPage("Home");
+        setAuthOpen(true);
+      } else {
+        const params = new URLSearchParams(window.location.search);
+        setPage(params.has("cf_order_id") || params.has("order_id") || params.has("payment_order_id") ? "Checkout" : "Home");
+      }
       setDetailSelection(null);
     }
     window.addEventListener("popstate", restoreRoute);
     return () => window.removeEventListener("popstate", restoreRoute);
   }, []);
+
+  useEffect(() => {
+    if (!returnOrderId) return;
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
+
+    async function verifyReturnPayment() {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/payments/status?orderId=${encodeURIComponent(returnOrderId!)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "PAID" || data.order_status === "PAID" || data.payment_status === "Paid" || data.order?.payment_status === "PAID") {
+            setCartIds([]);
+            try { localStorage.removeItem("techcircuit-cart"); } catch {}
+            const ord = data.order || { id: returnOrderId, order_number: returnOrderId };
+            setReturnConfirmedOrder(ord);
+            setPage("Checkout");
+          }
+        }
+      } catch (err) {
+        console.error("Failed to verify return order:", err);
+      }
+    }
+    void verifyReturnPayment();
+  }, [returnOrderId]);
+
+  function viewOrderDetails(order: AdminOrder) {
+    setActiveTrackingOrder(order);
+    setStudentSection("orders");
+    setPage("Dashboard");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   useEffect(() => {
     localStorage.setItem("techcircuit-saved", JSON.stringify(savedIds));
@@ -747,20 +1056,24 @@ function App() {
     const isOAuthCallback = !isRecoveryCallback && (new URLSearchParams(window.location.search).has("code") || hashParams.has("access_token"));
     void client.auth.getSession().then(({ data, error }) => {
       if (error) {
-        setDataError("Could not restore your student session.");
+        setDataError("Could not restore your session.");
         return;
       }
       if (data.session?.user) {
-        setStudent(data.session.user);
-        if (isRecoveryCallback) {
-          setAuthRecovery(true);
-          setAuthOpen(true);
-        }
-        if (isOAuthCallback) setPage("Dashboard");
+        void resolveUserRole(client, data.session.user).then((role) => {
+          if (isRecoveryCallback) {
+            setAuthRecovery(true);
+            setAuthOpen(true);
+          }
+          if (isOAuthCallback && role === "student") setPage("Dashboard");
+        });
+      } else {
+        setCurrentUser(null);
+        setUserRole(null);
       }
-    }).catch(() => setDataError("Could not restore your student session."));
+    }).catch(() => setDataError("Could not restore your session."));
     const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
-      setStudent(session?.user ?? null);
+      void resolveUserRole(client, session?.user ?? null);
       if (event === "PASSWORD_RECOVERY") {
         setAuthRecovery(true);
         setAuthOpen(true);
@@ -809,7 +1122,23 @@ function App() {
     return () => window.removeEventListener("techcircuit:listings-updated", loadListings);
   }, []);
 
-  const listings = useMemo(() => [...remoteListings, ...catalog], [remoteListings]);
+  const listings = useMemo(() => {
+    const all = [...remoteListings, ...catalog];
+    const seenIds = new Set<string>();
+    const seenKeys = new Set<string>();
+    const result: Listing[] = [];
+
+    for (const item of all) {
+      const key = `${item.kind}:${item.title.trim().toLowerCase()}`;
+      if (seenIds.has(item.id) || seenKeys.has(key)) {
+        continue;
+      }
+      seenIds.add(item.id);
+      seenKeys.add(key);
+      result.push(item);
+    }
+    return result;
+  }, [remoteListings]);
 
   useEffect(() => {
     if (!student) return;
@@ -992,32 +1321,6 @@ function App() {
     setCartIds((current) => current.filter((cartId) => cartId !== id));
   }
 
-  async function beginCheckout(customer: CheckoutCustomer) {
-    if (cartIds.length === 0) throw new Error("Your cart is empty.");
-    const response = await fetch(`${API_BASE_URL}/api/checkout/orders`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectIds: cartIds, customer }),
-    });
-    const payload = await response.json() as CheckoutOrderResponse | { error?: string };
-    if (!response.ok) {
-      throw new Error("error" in payload && payload.error ? payload.error : "Could not create your payment order.");
-    }
-    if (!("payment_session_id" in payload) || !payload.payment_session_id || !payload.order_id) {
-      throw new Error("The payment server returned an invalid order response.");
-    }
-    if (!window.Cashfree) {
-      throw new Error("Secure checkout could not load. Refresh the page and try again.");
-    }
-    localStorage.setItem(`${PENDING_ORDER_KEY}${payload.order_id}`, JSON.stringify(cartIds));
-    const checkout = window.Cashfree({ mode: payload.gateway_mode });
-    const result = await checkout.checkout({
-      paymentSessionId: payload.payment_session_id,
-      redirectTarget: "_self",
-    });
-    if (result?.error) throw new Error(result.error.message ?? "Payment checkout could not be opened.");
-  }
-
   function toggleSaved(id: string) {
     setSavedIds((current) => current.includes(id) ? current.filter((saved) => saved !== id) : [...current, id]);
   }
@@ -1033,7 +1336,8 @@ function App() {
   if (page === "Admin") return <AdminPage onExit={() => navigate("Home")} />;
 
   return (
-    <div className={`app-shell${page === "Home" ? " home-shell" : ""}${page === "Projects" && !detailSelection ? " projects-shell" : ""}`}>
+    <>
+      <div className={`app-shell${page === "Home" ? " home-shell" : ""}${page === "Projects" && !detailSelection ? " projects-shell" : ""}`}>
       <header className="site-header">
         <button className="brand" onClick={() => navigate("Home")} aria-label={`${PLATFORM_NAME} home`}>
           <img className="brand-logo" src={brandLogo} alt={PLATFORM_NAME} />
@@ -1056,38 +1360,60 @@ function App() {
             <ShoppingCart size={18} />
             {cartIds.length > 0 && <span className="header-cart-count">{cartIds.length}</span>}
           </button>
-          {student ? (
+          {currentUser ? (
             <div className="student-menu-wrap">
               <button
                 className="student-profile-button"
                 type="button"
                 onClick={() => setStudentMenuOpen((open) => !open)}
-                aria-label="Open student account menu"
-                title="Student dashboard and account options"
+                aria-label={userRole === "admin" ? "Open administrator menu" : "Open student account menu"}
+                title={userRole === "admin" ? "Administrator options" : "Student dashboard and account options"}
                 aria-expanded={studentMenuOpen}
                 aria-haspopup="menu"
               >
-                <span className="student-avatar"><UserRound size={17} /></span>
-                <span className="student-profile-label">Account</span>
-                <ChevronDown size={14} />
+                <span className="student-avatar">{userRole === "admin" ? <ShieldCheck size={17} /> : <UserRound size={17} />}</span>
+                <span className="student-profile-label">{userRole === "admin" ? "Admin" : ""}</span>
+                <ChevronDown size={11} />
               </button>
               {studentMenuOpen && (
-                <div className="student-menu" role="menu" aria-label="Student menu">
+                <div className="student-menu" role="menu" aria-label={userRole === "admin" ? "Administrator menu" : "Student menu"}>
                   <div className="student-menu-account">
-                    <strong>Student account</strong>
-                    <span>{student.email}</span>
+                    <strong>{userRole === "admin" ? "Administrator account" : "Student account"}</strong>
+                    <span>{currentUser.email}</span>
                   </div>
-                  {studentMenuItems.map(({ id, label, icon: Icon }) => (
-                    <button key={id} type="button" role="menuitem" onClick={() => openStudentDestination(id)}>
-                      <Icon size={16} />
-                      <span>{label}</span>
-                    </button>
-                  ))}
+                  {userRole === "admin" ? (
+                    <>
+                      <button type="button" role="menuitem" onClick={() => { setStudentMenuOpen(false); navigate("Admin"); }}>
+                        <UserCog size={16} />
+                        <span>Admin Console</span>
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => { setStudentMenuOpen(false); void handleSignOut(); }}>
+                        <LogOut size={16} />
+                        <span>Sign out</span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {studentMenuItems.map(({ id, label, icon: Icon }) => (
+                        <button key={id} type="button" role="menuitem" onClick={() => openStudentDestination(id)}>
+                          <Icon size={16} />
+                          <span>{label}</span>
+                        </button>
+                      ))}
+                      <button type="button" role="menuitem" onClick={() => { setStudentMenuOpen(false); void handleSignOut(); }}>
+                        <LogOut size={16} />
+                        <span>Sign out</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
           ) : (
-            <button className="sign-button" onClick={() => setAuthOpen(true)}>Sign in <ArrowRight size={14} /></button>
+            <button className="sign-button" onClick={() => {
+              setAuthOpen(true);
+              window.history.pushState({}, "", "/student-login");
+            }}>Sign in <ArrowRight size={14} /></button>
           )}
           <button className="menu-toggle" aria-label={menuOpen ? "Close site navigation" : "Open site navigation"} title="Site navigation" aria-controls="main-navigation" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
             {menuOpen ? <X size={21} /> : <Menu size={21} />}
@@ -1116,15 +1442,52 @@ function App() {
           onViewListing={openListingDetails}
         />
       ) : page === "Dashboard" ? (
-        <StudentDashboard student={student} section={studentSection} setSection={setStudentSection} navigate={navigate} listings={listings} savedIds={savedIds} onViewListing={openListingDetails} opportunityActivityRevision={opportunityActivityRevision} onUpdateOpportunityActivity={(activity, status) => void saveOpportunityActivity({ id: activity.opportunity_id, kind: activity.opportunity_kind, title: activity.title, organization: activity.organization, city: activity.city, sourceUrl: activity.opportunity_url, summary: "", tags: [] }, status)} />
+        userRole === "admin" ? (
+          <main className="directory-page">
+            <section className="directory-content">
+              <div className="empty-state">
+                <div className="empty-icon"><ShieldCheck size={24} /></div>
+                <span className="eyebrow"><span className="eyebrow-line" /> ADMINISTRATOR ACCOUNT</span>
+                <h3>You are signed in as an administrator.</h3>
+                <p>Student dashboards and profile features are for student accounts. You can manage the platform using the Admin Console.</p>
+                <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginTop: "16px", flexWrap: "wrap" }}>
+                  <button className="button button-dark" onClick={() => navigate("Admin")}>Go to Admin Console <ArrowRight size={15} /></button>
+                  <button className="button button-outline" onClick={() => void handleSignOut()}>Sign out</button>
+                </div>
+              </div>
+            </section>
+          </main>
+        ) : (
+          <StudentDashboard
+            student={student}
+            section={studentSection}
+            setSection={setStudentSection}
+            navigate={navigate}
+            listings={listings}
+            savedIds={savedIds}
+            onViewListing={openListingDetails}
+            opportunityActivityRevision={opportunityActivityRevision}
+            onUpdateOpportunityActivity={(activity, status) => void saveOpportunityActivity({ id: activity.opportunity_id, kind: activity.opportunity_kind, title: activity.title, organization: activity.organization, city: activity.city, sourceUrl: activity.opportunity_url, summary: "", tags: [] }, status)}
+            initialTrackingOrder={activeTrackingOrder}
+            onClearInitialTrackingOrder={() => setActiveTrackingOrder(null)}
+          />
+        )
       ) : page === "Cart" ? (
         <ProjectCartPage listings={listings} cartIds={cartIds} removeProject={removeProjectFromCart} onCheckout={() => navigate("Checkout")} onContinueShopping={() => navigate("Projects")} onViewListing={openListingDetails} />
-      ) : page === "Checkout" ? (
-        <ProjectCheckoutPage listings={listings} cartIds={cartIds} onSubmitCheckout={beginCheckout} onBackToCart={() => navigate("Cart")} />
-      ) : page === "PaymentResult" ? (
-        <PaymentResultPage orderId={paymentOrderId} apiBaseUrl={API_BASE_URL} cartIds={cartIds} setCartIds={setCartIds} onContinue={() => navigate("Projects")} />
+      ) : page === "Checkout" || page === "PaymentResult" ? (
+        <ProjectCheckoutPage
+          listings={listings}
+          cartIds={cartIds}
+          setCartIds={setCartIds}
+          currentUser={currentUser}
+          apiBaseUrl={API_BASE_URL}
+          navigate={navigate}
+          onBackToCart={() => navigate("Cart")}
+          initialConfirmedOrder={returnConfirmedOrder}
+          onViewOrderDetails={viewOrderDetails}
+        />
       ) : page === "Saved" ? (
-        <SavedPage listings={listings} savedIds={savedIds} toggleSaved={toggleSaved} setEnquiry={setEnquiry} onViewListing={openListingDetails} onViewResource={openResourceDetails} />
+        <SavedPage listings={listings} savedIds={savedIds} toggleSaved={toggleSaved} setEnquiry={setEnquiry} addProjectToCart={addProjectToCart} onViewListing={openListingDetails} onViewResource={openResourceDetails} />
       ) : page === "Products" ? (
         <ComponentCatalogPage listings={listings} />
       ) : (
@@ -1149,10 +1512,48 @@ function App() {
       {dataError && <div className="toast-error" role="status"><CircleHelp size={16} /> {dataError}</div>}
       {page === "Home" && !detailSelection && <HowItWorks />}
       <Footer navigate={navigate} />
-      {enquiry && <EnquiryModal listing={enquiry} onClose={() => setEnquiry(null)} />}
-      {authOpen && <StudentAuthModal isPasswordRecovery={authRecovery} onClose={() => setAuthOpen(false)} onAuthenticated={(user) => { setStudent(user); setStudentSection("overview"); setAuthRecovery(false); navigate("Dashboard"); }} />}
-      {pendingOpportunityPrompt && <OpportunityReturnPrompt listing={pendingOpportunityPrompt} busy={opportunityActivitySaving} error={opportunityActivityError} onChoose={(status) => void saveOpportunityActivity(pendingOpportunityPrompt, status)} />}
     </div>
+
+    {enquiry && <EnquiryModal listing={enquiry} onClose={() => setEnquiry(null)} />}
+    {authOpen && <StudentAuthModal isPasswordRecovery={authRecovery} onClose={() => {
+      setAuthOpen(false);
+      if (["/login", "/signin", "/student-login", "/auth"].includes(window.location.pathname.replace(/\/+$/, ""))) {
+        window.history.pushState({}, "", "/");
+      }
+    }} onAuthenticated={(user) => {
+      if (["/login", "/signin", "/student-login", "/auth"].includes(window.location.pathname.replace(/\/+$/, ""))) {
+        window.history.pushState({}, "", "/");
+      }
+      const client = getSupabase();
+      if (client) {
+        void resolveUserRole(client, user).then((role) => {
+          setStudentSection("overview");
+          setAuthRecovery(false);
+          if (role === "student") navigate("Dashboard");
+        });
+      } else {
+        setCurrentUser(user);
+        setUserRole("student");
+        setStudentSection("overview");
+        setAuthRecovery(false);
+        navigate("Dashboard");
+      }
+    }} />}
+    {pendingOpportunityPrompt && (
+      <OpportunityReturnPrompt
+        listing={pendingOpportunityPrompt}
+        busy={opportunityActivitySaving}
+        error={opportunityActivityError}
+        onChoose={(status) => void saveOpportunityActivity(pendingOpportunityPrompt, status)}
+        onDismiss={() => setPendingOpportunityPrompt(null)}
+        student={student}
+        onSignIn={() => {
+          setPendingOpportunityPrompt(null);
+          setAuthOpen(true);
+        }}
+      />
+    )}
+  </>
   );
 }
 
@@ -1243,18 +1644,18 @@ function HomePage({
               <h2>{activeSlide.title}</h2>
               <p>{activeSlide.description}</p>
               <button className="button button-primary" onClick={() => navigate(activeSlide.page)}>{activeSlide.action} <ArrowRight size={15} /></button>
-            </div>
-            <div className="home-showcase-dots" aria-label="Choose spotlight">
-                {homeShowcaseImages.map((_, index) => (
-                  <button
-                    key={index}
-                    className={`home-showcase-dot${index === showcaseIndex ? " active" : ""}`}
-                    type="button"
-                    aria-label={`Show spotlight ${index + 1}`}
-                    aria-current={index === showcaseIndex ? "true" : undefined}
-                    onClick={() => setShowcaseIndex(index)}
-                  />
-                ))}
+              <div className="home-showcase-dots" aria-label="Choose spotlight">
+                  {homeShowcaseImages.map((_, index) => (
+                    <button
+                      key={index}
+                      className={`home-showcase-dot${index === showcaseIndex ? " active" : ""}`}
+                      type="button"
+                      aria-label={`Show spotlight ${index + 1}`}
+                      aria-current={index === showcaseIndex ? "true" : undefined}
+                      onClick={() => setShowcaseIndex(index)}
+                    />
+                  ))}
+              </div>
             </div>
         </div>
         <section className="home-categories" id="explore">
@@ -1276,7 +1677,7 @@ function HomePage({
             <article className="home-project-card" key={item.id}>
               <div className="home-project-image">
                 {item.imageUrl && <img src={item.imageUrl} alt={`${item.title} project`} loading="lazy" />}
-                <span>Sample</span>
+                <span>READY-MADE KIT</span>
               </div>
               <div className="home-project-content">
                 <h3>{item.title}</h3>
@@ -1603,7 +2004,6 @@ function ListingDetailPage({
   const isProject = listing.kind === "Projects";
   const isOpportunity = ["Internships", "Training", "Hackathons"].includes(listing.kind);
   const detailImage = isProject ? listing.imageUrl : listing.kind === "Internships" ? internshipOpportunityImage : listing.kind === "Hackathons" ? hackathonOpportunityImage : undefined;
-  const isSample = listing.id.startsWith("sample-");
   return (
     <main className="detail-page">
       <div className="detail-content">
@@ -1611,12 +2011,13 @@ function ListingDetailPage({
         <section className="detail-panel">
           <div className={`detail-visual${detailImage ? " has-detail-image" : ""}`}>
             {detailImage ? <img src={detailImage} alt={`${listing.title} preview`} /> : <><CircuitBoard size={58} strokeWidth={1.1} /><span>{listing.kind.toUpperCase()} / TECHCIRCUIT HUB</span></>}
-            {isProject && <span className="detail-visual-badge">STUDENT CONCEPT</span>}
+            {isProject && <span className="detail-visual-badge">HARDWARE PROJECT</span>}
+            {isOpportunity && isOpportunityEnded(listing) && <span className="detail-visual-badge ended-badge">ENDED</span>}
           </div>
           <div className="detail-copy">
             <div className="eyebrow"><span className="eyebrow-line" /> {listing.projectCategory ?? listing.kind}</div>
             <h1>{listing.title}</h1>
-            <p className="detail-byline">{isProject ? "Student project concept" : listing.organization} <span>·</span> {listing.city}</p>
+            <p className="detail-byline">{isProject ? "Hardware Project Kit" : listing.organization} <span>·</span> {listing.city}</p>
             {isProject && listing.projectPrice !== undefined && <div className="detail-price">{formatPrice(listing.projectPrice)}</div>}
             <p className="detail-summary">{listing.summary}</p>
             {(listing.mode || listing.duration || listing.eligibility) && (
@@ -1640,13 +2041,17 @@ function ListingDetailPage({
                 <a className="text-link" href={listing.sourceUrl} target="_blank" rel="noreferrer" onClick={() => onTrackOpportunity?.(listing)}>{isTrackableOpportunity(listing) ? "Visit opportunity source" : "Visit official source"} <ArrowUpRight size={15} /></a>
               </section>
             )}
-            {isSample && <p className="detail-notice"><CircleHelp size={15} /> Illustrative sample listing. Contact details and current availability have not been provided.</p>}
-            {isProject && <p className="detail-notice"><ShieldCheck size={15} /> Educational project concept. Final components and scope can be customized.</p>}
-            {isOpportunity && <p className="detail-notice"><ShieldCheck size={15} /> Opportunity details can change. Verify deadlines, eligibility, fees, and application status with the organizer.</p>}
+            {isProject && (
+              <p className="detail-notice">
+                <Truck size={16} /> <strong>Built to order.</strong> Delivered to your address in about 7 days after payment. Handcrafted hardware kit with verified components and schematic documentation.
+              </p>
+            )}
+            {isOpportunity && isOpportunityEnded(listing) && <p className="detail-notice ended-notice"><CircleHelp size={15} /> Event dates or registration deadlines for this opportunity have already passed.</p>}
+            {isOpportunity && !isOpportunityEnded(listing) && <p className="detail-notice"><ShieldCheck size={15} /> Opportunity details can change. Verify deadlines, eligibility, fees, and application status with the organizer.</p>}
             <div className="detail-actions">
-              {onOrder && <button className="button button-dark" type="button" onClick={onOrder}>Order now <ArrowRight size={15} /></button>}
-              {onCustomize && <button className="button button-outline" type="button" onClick={onCustomize}>Customize project <ArrowRight size={15} /></button>}
-              {onEnquire && <button className="button button-dark" type="button" onClick={onEnquire}>Enquire <ArrowRight size={15} /></button>}
+              {onOrder && isProject && <button className="button button-dark" type="button" onClick={onOrder}>Order now <ArrowRight size={15} /></button>}
+              {onCustomize && isProject && <button className="button button-outline" type="button" onClick={onCustomize}>Customize project <ArrowRight size={15} /></button>}
+              {onEnquire && !isProject && <button className="button button-dark" type="button" onClick={onEnquire}>Enquire <ArrowRight size={15} /></button>}
               <button className="button button-outline" type="button" onClick={onSave}>{isSaved ? <BookmarkCheck size={15} /> : <Bookmark size={15} />}{isSaved ? "Saved" : "Save for later"}</button>
             </div>
           </div>
@@ -1927,83 +2332,1923 @@ function ProjectCartPage({
   );
 }
 
+const INDIAN_STATES_AND_UTS = [
+  "Andaman and Nicobar Islands",
+  "Andhra Pradesh",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chandigarh",
+  "Chhattisgarh",
+  "Dadra and Nagar Haveli and Daman and Diu",
+  "Delhi",
+  "Goa",
+  "Gujarat",
+  "Haryana",
+  "Himachal Pradesh",
+  "Jammu and Kashmir",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Ladakh",
+  "Lakshadweep",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Odisha",
+  "Puducherry",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarakhand",
+  "West Bengal",
+];
+
+function formatRupee(amount: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function VisaLogo() {
+  return (
+    <svg width="38" height="13" viewBox="0 0 100 32" fill="none" aria-label="Visa" style={{ display: "block" }}>
+      <path d="M38.8 31.4L44.1 0.6H52.5L47.2 31.4H38.8Z" fill="#1A1F71" />
+      <path d="M73.5 1.1C71.8 0.4 69.1 0 65.8 0C57.5 0 51.7 4.4 51.6 10.7C51.5 15.4 55.7 18 58.9 19.5C62.1 21.1 63.3 22.1 63.3 23.5C63.3 25.7 60.7 26.7 58.2 26.7C54.1 26.7 51.8 26.1 48.2 24.5L46.8 23.8L45.3 30.6C47.2 31.5 50.7 32.2 54.4 32.2C63.2 32.2 68.9 27.8 69 21.3C69.1 16.3 66.1 12.6 59.7 9.5C56.3 7.8 55.4 6.7 55.4 5.3C55.4 3.7 57.2 2.7 60.4 2.7C63.1 2.7 65.1 3.3 66.8 4L67.7 4.4L73.5 1.1Z" fill="#1A1F71" />
+      <path d="M81.5 24.6C82.1 22.9 85.1 14.8 85.1 14.8C85.1 14.8 85.7 13.1 86.1 12.1L86.6 14.6C87.2 17.5 89.2 26.5 89.5 27.9L81.5 24.6ZM94.2 0.6H87.7C85.7 0.6 84.1 1.2 83.2 3.3L71 31.4H79.5C79.5 31.4 80.9 27.5 81.3 26.5C82.1 26.5 89.5 26.5 90.6 26.5C90.9 27.7 91.6 31.4 91.6 31.4H99.1L94.2 0.6Z" fill="#1A1F71" />
+      <path d="M25.7 0.6L17.7 22.3L16.8 17.9C15.3 12.8 10.7 7.2 5.8 4.6L13.1 31.4H21.6L34.2 0.6H25.7Z" fill="#1A1F71" />
+      <path d="M12.7 0.6H0.2L0 1.2C9.7 3.7 16.1 7.9 18.8 11.4L16.1 1.9C15.6 0.7 14.3 0.6 12.7 0.6Z" fill="#F7B600" />
+    </svg>
+  );
+}
+
+function MastercardLogo() {
+  return (
+    <svg width="28" height="18" viewBox="0 0 38 24" fill="none" aria-label="Mastercard" style={{ display: "block" }}>
+      <circle cx="12" cy="12" r="12" fill="#EB001B" />
+      <circle cx="26" cy="12" r="12" fill="#F79E1B" fillOpacity="0.9" />
+    </svg>
+  );
+}
+
+function RuPayLogo() {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", fontStyle: "italic", fontWeight: 900, fontSize: "13px", letterSpacing: "-0.02em" }}>
+      <span style={{ color: "#0055A5" }}>Ru</span>
+      <span style={{ color: "#E35205" }}>Pay</span>
+      <span style={{ color: "#00A3E0", marginLeft: "1px", fontStyle: "normal", fontSize: "11px", fontWeight: 800 }}>»</span>
+    </span>
+  );
+}
+
+function UpiIconBadge() {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "2px", fontWeight: 900, fontSize: "11px", letterSpacing: "0.04em", color: "#0F1F3D", background: "#F1F5F9", padding: "2px 5px", borderRadius: "4px" }}>
+      <span style={{ color: "#008850" }}>▲</span>
+      <span>UPI</span>
+    </span>
+  );
+}
+
+function GooglePayLogo() {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "2px", fontWeight: 700, fontSize: "12px" }}>
+      <span style={{ color: "#4285F4" }}>G</span>
+      <span style={{ color: "#5F6368" }}>Pay</span>
+    </span>
+  );
+}
+
+function PhonePeLogo() {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "19px", height: "19px", borderRadius: "50%", background: "#5F259F", color: "#FFFFFF", fontSize: "10.5px", fontWeight: 900 }}>
+      पे
+    </span>
+  );
+}
+
+function PaytmLogo() {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", fontWeight: 800, fontSize: "12px" }}>
+      <span style={{ color: "#002970" }}>pay</span>
+      <span style={{ color: "#00BAF2" }}>tm</span>
+    </span>
+  );
+}
+
+type CheckoutStep = "delivery" | "summary" | "payment" | "confirmation";
+
 function ProjectCheckoutPage({
   listings,
   cartIds,
-  onSubmitCheckout,
+  setCartIds,
+  currentUser,
+  apiBaseUrl,
+  navigate,
   onBackToCart,
+  initialConfirmedOrder,
+  onViewOrderDetails,
 }: {
   listings: Listing[];
   cartIds: string[];
-  onSubmitCheckout: (customer: CheckoutCustomer) => Promise<void>;
+  setCartIds?: Dispatch<SetStateAction<string[]>>;
+  currentUser?: User | null;
+  apiBaseUrl?: string;
+  navigate?: (page: Page) => void;
   onBackToCart: () => void;
+  initialConfirmedOrder?: AdminOrder | null;
+  onViewOrderDetails?: (order: AdminOrder) => void;
 }) {
-  const projects = cartIds.map((id) => listings.find((item) => item.id === id && item.kind === "Projects")).filter((item): item is Listing => Boolean(item));
-  const total = projects.reduce((sum, item) => sum + projectPrice(item), 0);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [step, setStep] = useState<CheckoutStep>(() => initialConfirmedOrder ? "confirmation" : "delivery");
+  const [addressMode, setAddressMode] = useState<"saved" | "new">("saved");
+  const [mobileSummaryOpen, setMobileSummaryOpen] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError("");
-    const form = new FormData(event.currentTarget);
-    try {
-      await onSubmitCheckout({
-        name: String(form.get("name") ?? "").trim(),
-        email: String(form.get("email") ?? "").trim(),
-        phone: String(form.get("phone") ?? "").trim(),
+  // Address fields (no hardcoded test data)
+  const [fullName, setFullName] = useState(currentUser?.user_metadata?.name || "");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const emailAddress = currentUser?.email || "";
+  const [addressLine1, setAddressLine1] = useState("");
+  const [addressLine2, setAddressLine2] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("Tamil Nadu");
+  const [pincode, setPincode] = useState("");
+  const [saveForFuture, setSaveForFuture] = useState(true);
+
+  // Payment fields
+  const [paymentMethod, setPaymentMethod] = useState<"card" | "upi">("card");
+  const [submitting, setSubmitting] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
+  const [confirmedOrderId, setConfirmedOrderId] = useState(() => initialConfirmedOrder?.order_number || initialConfirmedOrder?.id || "");
+  const [confirmedOrder, setConfirmedOrder] = useState<AdminOrder | null>(() => initialConfirmedOrder || null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [policyModal, setPolicyModal] = useState<"terms" | "refund" | "delivery" | null>(null);
+  const [upiAwaiting, setUpiAwaiting] = useState(false);
+  const [upiTimer, setUpiTimer] = useState(300);
+
+  // Zepto / Redbus style countdown & copy state
+  const [detailCountdown, setDetailCountdown] = useState(5);
+  const [countdownPaused, setCountdownPaused] = useState(false);
+  const [copiedOrderId, setCopiedOrderId] = useState(false);
+
+  // Cashfree Element references
+  const cardElementsRef = useRef<{
+    cardNumber?: CashfreeComponent;
+    cardExpiry?: CashfreeComponent;
+    cardCvv?: CashfreeComponent;
+    cardHolder?: CashfreeComponent;
+  }>({});
+  const cardComponentRef = useRef<CashfreeComponent | null>(null);
+  const upiComponentRef = useRef<CashfreeComponent | null>(null);
+
+  // Saved user profile cache
+  const savedAddressRef = useRef({
+    fullName: currentUser?.user_metadata?.name || "",
+    phone: "",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    state: "Tamil Nadu",
+    pincode: "",
+  });
+
+  // Pre-load saved address from Supabase profile if signed in
+  useEffect(() => {
+    if (!currentUser) return;
+    const client = getSupabase();
+    if (!client) return;
+
+    void client
+      .from("profiles")
+      .select("display_name, name, phone, address_line1, address_line2, city, state, pincode")
+      .eq("id", currentUser.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          const profileName = (data.display_name || data.name as string | undefined)?.trim() || currentUser.user_metadata?.name || "";
+          const profilePhone = (data.phone as string | undefined)?.trim() || "";
+          const line1 = (data.address_line1 as string | undefined)?.trim() || "";
+          const line2 = (data.address_line2 as string | undefined)?.trim() || "";
+          const c = (data.city as string | undefined)?.trim() || "";
+          const s = (data.state as string | undefined)?.trim() || "Tamil Nadu";
+          const pin = (data.pincode as string | undefined)?.trim() || "";
+
+          savedAddressRef.current = {
+            fullName: profileName,
+            phone: profilePhone,
+            addressLine1: line1,
+            addressLine2: line2,
+            city: c,
+            state: s,
+            pincode: pin,
+          };
+
+          if (addressMode === "saved") {
+            if (profileName) setFullName(profileName);
+            if (profilePhone) setPhoneNumber(profilePhone);
+            if (line1) setAddressLine1(line1);
+            if (line2) setAddressLine2(line2);
+            if (c) setCity(c);
+            if (s) setState(s);
+            if (pin) setPincode(pin);
+          }
+        }
       });
-    } catch (checkoutError) {
-      setError(checkoutError instanceof Error ? checkoutError.message : "Could not start checkout. Please try again.");
+  }, [currentUser, addressMode]);
+
+  // Cart project items
+  const activeCartItems = cartIds
+    .map((id) => listings.find((item) => item.id === id && item.kind === "Projects"))
+    .filter((item): item is Listing => Boolean(item));
+
+  const [purchasedItems, setPurchasedItems] = useState<Listing[]>(() => {
+    if (initialConfirmedOrder?.items && listings.length) {
+      return initialConfirmedOrder.items.map((it) => {
+        const found = listings.find((l) => l.id === it.project_id);
+        if (found) return found;
+        return {
+          id: it.project_id,
+          title: it.title,
+          price: it.price,
+          imageUrl: internshipOpportunityImage,
+          kind: "Projects" as const,
+          organization: "TechCircuit Workshop",
+          city: "Chennai",
+          summary: "Custom handcrafted engineering project kit.",
+          tags: ["Engineering", "Hardware"],
+        };
+      });
+    }
+    return activeCartItems;
+  });
+
+  useEffect(() => {
+    if (activeCartItems.length > 0) {
+      setPurchasedItems(activeCartItems);
+    }
+  }, [activeCartItems]);
+
+  useEffect(() => {
+    if (initialConfirmedOrder) {
+      setConfirmedOrder(initialConfirmedOrder);
+      setConfirmedOrderId(initialConfirmedOrder.order_number || initialConfirmedOrder.id);
+      setStep("confirmation");
+      if (initialConfirmedOrder.items && listings.length) {
+        setPurchasedItems(
+          initialConfirmedOrder.items.map((it) => {
+            const found = listings.find((l) => l.id === it.project_id);
+            if (found) return found;
+            return {
+              id: it.project_id,
+              title: it.title,
+              price: it.price,
+              imageUrl: internshipOpportunityImage,
+              kind: "Projects" as const,
+              organization: "TechCircuit Workshop",
+              city: "Chennai",
+              summary: "Custom handcrafted engineering project kit.",
+              tags: ["Engineering", "Hardware"],
+            };
+          })
+        );
+      }
+    }
+  }, [initialConfirmedOrder, listings]);
+
+  useEffect(() => {
+    if (step !== "confirmation" || countdownPaused) return;
+    if (detailCountdown <= 0) {
+      goToOrderDetails();
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDetailCountdown((c) => c - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [step, detailCountdown, countdownPaused]);
+
+  function goToOrderDetails() {
+    setCountdownPaused(true);
+    if (confirmedOrder && onViewOrderDetails) {
+      onViewOrderDetails(confirmedOrder);
+    } else if (navigate) {
+      navigate("Dashboard");
+    }
+  }
+
+  function handleCopyOrderId(id: string) {
+    if (navigator?.clipboard?.writeText) {
+      void navigator.clipboard.writeText(id);
+      setCopiedOrderId(true);
+      setTimeout(() => setCopiedOrderId(false), 2200);
+    }
+  }
+
+  const displayItems = activeCartItems;
+  const subtotal = displayItems.reduce((acc, item) => acc + (projectPrice(item) || 3499), 0);
+  const shippingCharges = 0; // Free shipping
+  const total = subtotal + shippingCharges;
+
+  // Mount Cashfree Elements when payment step is reached
+  useEffect(() => {
+    if (step !== "payment") return;
+    const mode = (import.meta.env.VITE_CASHFREE_ENV as "sandbox" | "production") || "sandbox";
+
+    const timer = setTimeout(() => {
+      if (typeof window.Cashfree === "undefined") {
+        return;
+      }
+
+      try {
+        const cashfree = window.Cashfree({ mode });
+
+        if (paymentMethod === "card") {
+          const cardNumEl = document.getElementById("cf-card-number");
+          const cardExpEl = document.getElementById("cf-card-expiry");
+          const cardCvvEl = document.getElementById("cf-card-cvv");
+          const cardHolderEl = document.getElementById("cf-card-holder");
+
+          if (cardNumEl && cardExpEl && cardCvvEl && cardHolderEl) {
+            cardNumEl.innerHTML = "";
+            cardExpEl.innerHTML = "";
+            cardCvvEl.innerHTML = "";
+            cardHolderEl.innerHTML = "";
+
+            const cardNumber = cashfree.create("cardNumber", {
+              style: {
+                base: {
+                  fontSize: "14px",
+                  fontFamily: '"Plus Jakarta Sans", sans-serif',
+                  color: "#0F1F3D",
+                  "::placeholder": { color: "#94A3B8" },
+                },
+              },
+            });
+            cardNumber.mount("#cf-card-number");
+
+            const cardExpiry = cashfree.create("cardExpiry", {
+              style: {
+                base: {
+                  fontSize: "14px",
+                  fontFamily: '"Plus Jakarta Sans", sans-serif',
+                  color: "#0F1F3D",
+                  "::placeholder": { color: "#94A3B8" },
+                },
+              },
+            });
+            cardExpiry.mount("#cf-card-expiry");
+
+            const cardCvv = cashfree.create("cardCvv", {
+              style: {
+                base: {
+                  fontSize: "14px",
+                  fontFamily: '"Plus Jakarta Sans", sans-serif',
+                  color: "#0F1F3D",
+                  "::placeholder": { color: "#94A3B8" },
+                },
+              },
+            });
+            cardCvv.mount("#cf-card-cvv");
+
+            const cardHolder = cashfree.create("cardHolder", {
+              values: { placeholder: "Name on Card" },
+              style: {
+                base: {
+                  fontSize: "14px",
+                  fontFamily: '"Plus Jakarta Sans", sans-serif',
+                  color: "#0F1F3D",
+                  "::placeholder": { color: "#94A3B8" },
+                },
+              },
+            });
+            cardHolder.mount("#cf-card-holder");
+
+            cardElementsRef.current = { cardNumber, cardExpiry, cardCvv, cardHolder };
+            cardComponentRef.current = cardNumber;
+          }
+        } else if (paymentMethod === "upi") {
+          const upiEl = document.getElementById("cf-upi-collect");
+          if (upiEl) {
+            upiEl.innerHTML = "";
+            const upiCollect = cashfree.create("upiCollect", {
+              values: { placeholder: "username@okhdfcbank" },
+              style: {
+                base: {
+                  fontSize: "14px",
+                  fontFamily: '"Plus Jakarta Sans", sans-serif',
+                  color: "#0F1F3D",
+                  "::placeholder": { color: "#94A3B8" },
+                },
+              },
+            });
+            upiCollect.mount("#cf-upi-collect");
+            upiComponentRef.current = upiCollect;
+          }
+        }
+      } catch (sdkErr) {
+        console.error("Cashfree element initialization error:", sdkErr);
+      }
+    }, 60);
+
+    return () => clearTimeout(timer);
+  }, [step, paymentMethod]);
+
+  // UPI approval countdown
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined;
+    if (upiAwaiting && upiTimer > 0) {
+      interval = setInterval(() => {
+        setUpiTimer((t) => t - 1);
+      }, 1000);
+    } else if (upiTimer === 0 && upiAwaiting) {
+      setUpiAwaiting(false);
+      setSubmitting(false);
+      setPaymentError("UPI approval timed out. Please try again or switch to Card payment.");
+    }
+    return () => clearInterval(interval);
+  }, [upiAwaiting, upiTimer]);
+
+  // Handle Radio address mode change
+  function handleAddressModeChange(mode: "saved" | "new") {
+    setAddressMode(mode);
+    setFieldErrors({});
+    if (mode === "saved") {
+      setFullName(savedAddressRef.current.fullName);
+      setPhoneNumber(savedAddressRef.current.phone);
+      setAddressLine1(savedAddressRef.current.addressLine1);
+      setAddressLine2(savedAddressRef.current.addressLine2);
+      setCity(savedAddressRef.current.city);
+      setState(savedAddressRef.current.state);
+      setPincode(savedAddressRef.current.pincode);
+    } else {
+      setFullName("");
+      setPhoneNumber("");
+      setAddressLine1("");
+      setAddressLine2("");
+      setCity("");
+      setState("Tamil Nadu");
+      setPincode("");
+    }
+  }
+
+  // Validate address fields
+  function validateDelivery(): boolean {
+    const errors: Record<string, string> = {};
+    const nameTrim = fullName.trim();
+    if (!nameTrim || nameTrim.length < 2) {
+      errors.fullName = "Please enter your full name (minimum 2 characters).";
+    }
+
+    const cleanPhone = phoneNumber.replace(/[\s-]/g, "");
+    const phoneRegex = /^(?:\+91|91|0)?[6-9]\d{9}$/;
+    if (!cleanPhone || cleanPhone === "+91" || !phoneRegex.test(cleanPhone)) {
+      errors.phoneNumber = "Please enter a valid 10-digit Indian mobile number (+91).";
+    }
+
+    const line1Trim = addressLine1.trim();
+    if (!line1Trim || line1Trim.length < 5) {
+      errors.addressLine1 = "Please enter a valid street address (minimum 5 characters).";
+    }
+
+    const cityTrim = city.trim();
+    if (!cityTrim) {
+      errors.city = "Please enter your city.";
+    }
+
+    if (!state.trim()) {
+      errors.state = "Please select your state or UT.";
+    }
+
+    const pinTrim = pincode.trim();
+    if (!pinTrim || !/^[1-9][0-9]{5}$/.test(pinTrim)) {
+      errors.pincode = "Please enter a valid 6-digit Indian postal pincode.";
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  }
+
+  function handleContinueToSummary(e: FormEvent) {
+    e.preventDefault();
+    if (!validateDelivery()) {
+      const firstErrorEl = document.querySelector(".checkout-input-field.has-error");
+      firstErrorEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    setStep("summary");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Handle Custom Web Checkout with Cashfree Elements (In-Page, NO redirect)
+  async function handlePayNow() {
+    if (activeCartItems.length === 0) {
+      setPaymentError("Your cart is empty. Please select a project first.");
+      return;
+    }
+    setSubmitting(true);
+    setPaymentError("");
+
+    const targetBaseUrl = apiBaseUrl || API_BASE_URL || window.location.origin;
+    const cleanPhone = phoneNumber.replace(/\D/g, "").slice(-10);
+    if (!cleanPhone || cleanPhone.length !== 10) {
+      setPaymentError("Please provide a valid 10-digit mobile number in Delivery Address.");
+      setSubmitting(false);
+      return;
+    }
+
+    const shippingAddressPayload = {
+      fullName: fullName.trim(),
+      phone: phoneNumber.trim(),
+      email: emailAddress.trim(),
+      addressLine1: addressLine1.trim(),
+      addressLine2: addressLine2.trim(),
+      city: city.trim(),
+      state: state.trim(),
+      pincode: pincode.trim(),
+    };
+
+    try {
+      // 1. Create order on server (price calculated on server, amount never accepted from browser)
+      const response = await fetch(`${targetBaseUrl}/api/payments/create-order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectIds: activeCartItems.map((item) => item.id),
+          customer: {
+            name: fullName.trim(),
+            email: emailAddress.trim(),
+            phone: cleanPhone,
+          },
+          shippingAddress: shippingAddressPayload,
+          paymentMethod,
+        }),
+      });
+
+      const orderData = (await response.json()) as {
+        order_id: string;
+        order_number?: string;
+        cashfree_order_id?: string;
+        payment_session_id?: string;
+        amount?: number;
+        error?: string;
+      };
+
+      if (!response.ok || !orderData.payment_session_id) {
+        throw new Error(orderData.error || "The payment provider could not process the request. Check server credentials.");
+      }
+
+      // Pre-save checkout context and purchased items
+      setPurchasedItems(activeCartItems);
+      try {
+        localStorage.setItem("techcircuit_last_checkout", JSON.stringify({
+          order_id: orderData.order_id,
+          order_number: orderData.order_number,
+          cashfree_order_id: orderData.cashfree_order_id,
+          items: activeCartItems,
+          shippingAddress: shippingAddressPayload,
+          paymentMethod,
+          total,
+          timestamp: Date.now(),
+        }));
+        localStorage.setItem("techcircuit-customer-email", shippingAddressPayload.email);
+      } catch {}
+
+      const mode = (import.meta.env.VITE_CASHFREE_ENV as "sandbox" | "production") || "sandbox";
+      if (typeof window.Cashfree === "undefined") {
+        throw new Error("Cashfree SDK not loaded. Please check your connection.");
+      }
+
+      const cashfree = window.Cashfree({ mode });
+      let paymentMethodPayload: any = null;
+
+      if (paymentMethod === "card") {
+        const { cardNumber, cardExpiry, cardCvv, cardHolder } = cardElementsRef.current;
+        if (!cardNumber || !cardExpiry || !cardCvv) {
+          throw new Error("Card inputs not ready. Please enter your card details.");
+        }
+        if (typeof cardNumber.isComplete === "function" && !cardNumber.isComplete()) {
+          throw new Error("Please enter a complete 16-digit card number.");
+        }
+        if (typeof cardExpiry.isComplete === "function" && !cardExpiry.isComplete()) {
+          throw new Error("Please enter a valid expiry date (MM/YY).");
+        }
+        if (typeof cardCvv.isComplete === "function" && !cardCvv.isComplete()) {
+          throw new Error("Please enter a valid 3-digit CVV.");
+        }
+        paymentMethodPayload = {
+          cardNumber,
+          cardExpiry,
+          cardCvv,
+          cardHolder: cardHolder || undefined,
+        };
+      } else {
+        const upiComp = upiComponentRef.current;
+        if (!upiComp) {
+          throw new Error("UPI input not ready. Please enter your UPI ID.");
+        }
+        if (typeof upiComp.isComplete === "function" && !upiComp.isComplete()) {
+          throw new Error("Please enter a valid UPI ID (e.g. success@upi).");
+        }
+        paymentMethodPayload = upiComp;
+      }
+
+      if (paymentMethod === "upi") {
+        setUpiAwaiting(true);
+        setUpiTimer(300);
+      }
+
+      // 2. Execute cashfree.pay() in-page (NO redirectTarget "_self", "_blank", or "_top")
+      const payResult = await cashfree.pay({
+        paymentMethod: paymentMethodPayload,
+        paymentSessionId: orderData.payment_session_id,
+        savePaymentInstrument: false,
+        redirectTarget: "_modal",
+      });
+
+      if (payResult?.error) {
+        setUpiAwaiting(false);
+        const errMsg = payResult.error.message || payResult.error.description || "Payment cancelled or rejected.";
+        throw new Error(errMsg);
+      }
+
+      // 3. Confirm authentic payment status on server (never trust browser alone)
+      let verifiedOrder: AdminOrder | null = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const statusRes = await fetch(
+          `${targetBaseUrl}/api/payments/status?orderId=${encodeURIComponent(orderData.order_id || orderData.cashfree_order_id || "")}`
+        );
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          if (
+            statusData.status === "PAID" ||
+            statusData.order_status === "PAID" ||
+            statusData.payment_status === "Paid" ||
+            statusData.order?.payment_status === "PAID"
+          ) {
+            verifiedOrder = statusData.order || {
+              id: orderData.order_id,
+              order_number: orderData.order_number || `TCH-ORD-${orderData.order_id.slice(-6).toUpperCase()}`,
+              total_amount: total,
+              customer_name: fullName.trim(),
+              customer_email: emailAddress.trim(),
+              customer_phone: cleanPhone,
+              shipping_address: shippingAddressPayload,
+              payment_method: paymentMethod,
+              payment_status: "PAID",
+              tracking_status: "Order Placed",
+              items: activeCartItems.map((item) => ({
+                project_id: item.id,
+                title: item.title,
+                price: projectPrice(item) || 3499,
+              })),
+            };
+            break;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+
+      setUpiAwaiting(false);
+
+      if (!verifiedOrder) {
+        throw new Error("Payment verification pending. If amount was debited, our team will confirm your order shortly.");
+      }
+
+      await finalizeSuccessfulOrder(verifiedOrder, shippingAddressPayload);
+    } catch (err: any) {
+      setUpiAwaiting(false);
+      console.error("[PAYMENT ERROR]", err);
+      let message = "Payment encountered an error. Please try again.";
+      if (typeof err === "string") {
+        message = err;
+      } else if (err?.error?.message) {
+        message = err.error.message;
+      } else if (err?.message) {
+        message = err.message;
+      } else if (err?.error_description) {
+        message = err.error_description;
+      } else if (typeof err?.error === "string") {
+        message = err.error;
+      }
+      setPaymentError(message);
       setSubmitting(false);
     }
   }
 
-  return (
-    <main className="directory-page checkout-page">
-      <section className="directory-hero checkout-hero">
-        <div className="directory-hero-copy">
-          <div className="eyebrow"><span className="eyebrow-line" /> SECURE PROJECT CHECKOUT</div>
-          <h1>Almost ready to <em>build.</em></h1>
-          <p>Enter your contact details to continue to payment and receive your order updates.</p>
-        </div>
-        <div className="directory-hero-art"><div className="hero-art-label">YOUR ORDER / YOUR DETAILS</div><div className="directory-art-chip"><ShieldCheck size={48} /></div><div className="art-small-label">SECURE PAYMENT SESSION</div></div>
-      </section>
-      <section className="directory-content checkout-content">
-        {projects.length === 0 ? (
-          <div className="empty-state"><div className="empty-icon"><ShoppingCart size={23} /></div><span className="eyebrow"><span className="eyebrow-line" /> NO ITEMS TO CHECK OUT</span><h3>Your cart is empty.</h3><p>Add a ready-made project before continuing to checkout.</p><button className="button button-primary" type="button" onClick={onBackToCart}>Return to cart <ArrowRight size={15} /></button></div>
-        ) : (
-          <div className="checkout-layout">
-            <form className="checkout-form" onSubmit={handleSubmit}>
-              <div><span className="eyebrow"><span className="eyebrow-line" /> CONTACT DETAILS</span><h2>Where should we reach you?</h2></div>
-              <label htmlFor="checkout-name">Full name</label>
-              <input id="checkout-name" name="name" autoComplete="name" required maxLength={100} />
-              <label htmlFor="checkout-email">Email address</label>
-              <input id="checkout-email" name="email" type="email" autoComplete="email" required maxLength={254} />
-              <label htmlFor="checkout-phone">Mobile number</label>
-              <input id="checkout-phone" name="phone" type="tel" autoComplete="tel" inputMode="tel" pattern="[0-9+() .-]{8,20}" required title="Enter a valid mobile number." />
-              {error && <p className="checkout-error" role="alert">{error}</p>}
-              <button className="button button-dark cart-checkout-button" type="submit" disabled={submitting}>
-                {submitting ? "Preparing secure checkout…" : <>Continue to payment <ArrowRight size={16} /></>}
-              </button>
-              <button className="text-link checkout-back" type="button" onClick={onBackToCart}>Back to cart</button>
-            </form>
-            <aside className="cart-summary checkout-summary">
-              <span className="eyebrow"><span className="eyebrow-line" /> ORDER SUMMARY</span>
-              <h2>{projects.length} project{projects.length === 1 ? "" : "s"}</h2>
-              {projects.map((item) => <div className="checkout-summary-item" key={item.id}><span>{item.title}</span><strong>{formatPrice(projectPrice(item))}</strong></div>)}
-              <div className="cart-summary-total"><span>Subtotal</span><strong>{formatPrice(total)}</strong></div>
-              <p>Any delivery costs will be shown before you confirm payment.</p>
-            </aside>
+  async function finalizeSuccessfulOrder(
+    order: AdminOrder | { id: string; order_number?: string },
+    shippingPayload: {
+      fullName: string;
+      phone: string;
+      email: string;
+      addressLine1: string;
+      addressLine2: string;
+      city: string;
+      state: string;
+      pincode: string;
+    }
+  ) {
+    if (saveForFuture && currentUser) {
+      const client = getSupabase();
+      if (client) {
+        void client
+          .from("profiles")
+          .update({
+            name: shippingPayload.fullName,
+            phone: shippingPayload.phone,
+            address_line1: shippingPayload.addressLine1,
+            address_line2: shippingPayload.addressLine2,
+            city: shippingPayload.city,
+            state: shippingPayload.state,
+            pincode: shippingPayload.pincode,
+          })
+          .eq("id", currentUser.id);
+      }
+    }
+
+    if (setCartIds) {
+      setCartIds([]);
+    }
+    try {
+      localStorage.removeItem("techcircuit-cart");
+    } catch {
+      // ignore
+    }
+
+    setConfirmedOrderId(order.order_number || order.id);
+    setConfirmedOrder(order as AdminOrder);
+    setSubmitting(false);
+    setStep("confirmation");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Shared Order Summary Card JSX
+  const renderOrderSummaryCard = (isMobileTop = false) => (
+    <aside className={`checkout-order-summary-card ${isMobileTop ? "mobile-top-summary" : ""}`}>
+      {isMobileTop ? (
+        <button
+          type="button"
+          onClick={() => setMobileSummaryOpen((open) => !open)}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "transparent",
+            border: 0,
+            padding: 0,
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div className="checkout-summary-head-icon"><ShoppingCart size={20} /></div>
+            <div>
+              <strong style={{ fontSize: "15px", color: "#0F1F3D", display: "block" }}>Order Summary ({displayItems.length} item{displayItems.length > 1 ? "s" : ""})</strong>
+              <span style={{ fontSize: "13px", color: "#F97316", fontWeight: 700 }}>{formatRupee(total)}</span>
+            </div>
           </div>
+          <div style={{ color: "#64748B", display: "flex", alignItems: "center", gap: "4px", fontSize: "12.5px" }}>
+            <span>{mobileSummaryOpen ? "Hide" : "Show"}</span>
+            {mobileSummaryOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </div>
+        </button>
+      ) : (
+        <div className="checkout-summary-head">
+          <div className="checkout-summary-head-icon"><ShoppingCart size={22} /></div>
+          <h2>Order Summary</h2>
+        </div>
+      )}
+
+      {(!isMobileTop || mobileSummaryOpen) && (
+        <div style={{ marginTop: isMobileTop ? "16px" : "0" }}>
+          <div className="checkout-summary-items-list">
+            {displayItems.map((item) => {
+              const itemAmt = projectPrice(item) || 3499;
+              return (
+                <div className="checkout-summary-item-row" key={item.id}>
+                  <img
+                    src={item.imageUrl || internshipOpportunityImage}
+                    alt={item.title}
+                    className="checkout-summary-item-img"
+                  />
+                  <div className="checkout-summary-item-text">
+                    <h4>{item.title}</h4>
+                    <p>Qty: 1</p>
+                  </div>
+                  <div className="checkout-summary-item-amt">{formatRupee(itemAmt)}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="checkout-summary-divider" />
+
+          <div className="checkout-summary-calc-row">
+            <span>Subtotal</span>
+            <strong>{formatRupee(subtotal)}</strong>
+          </div>
+          <div className="checkout-summary-calc-row">
+            <span>Shipping Charges</span>
+            <strong>₹0</strong>
+          </div>
+
+          <div className="checkout-summary-divider" />
+
+          <div className="checkout-summary-total-strip">
+            <span>Total</span>
+            <strong>{formatRupee(total)}</strong>
+          </div>
+
+          <div className="checkout-summary-info-pill">
+            {step === "payment" ? (
+              <>
+                <ShieldCheck size={20} />
+                <span>
+                  Your order will be securely processed after successful payment. You will receive a confirmation email shortly.
+                </span>
+              </>
+            ) : (
+              <>
+                <Truck size={20} />
+                <span>
+                  Your order will be shipped to the address you provide here. Please make sure the details are correct.
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </aside>
+  );
+
+  if (displayItems.length === 0 && step !== "confirmation") {
+    return (
+      <main className="checkout-experience-page">
+        <div className="checkout-page-container" style={{ maxWidth: "600px", margin: "60px auto", textAlign: "center" }}>
+          <div className="checkout-panel" style={{ padding: "48px 24px" }}>
+            <div
+              style={{
+                width: "64px",
+                height: "64px",
+                borderRadius: "50%",
+                background: "#FFF1E6",
+                color: "#F97316",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "0 auto 20px",
+              }}
+            >
+              <ShoppingCart size={32} />
+            </div>
+            <h2 style={{ fontSize: "22px", color: "#0F1F3D", marginBottom: "10px", fontWeight: 800 }}>
+              Your cart is empty
+            </h2>
+            <p style={{ color: "#64748B", fontSize: "14px", lineHeight: 1.6, marginBottom: "28px" }}>
+              Our engineering projects are handcrafted and built to order (~7 days delivery). Please select a project from our catalog to proceed to checkout.
+            </p>
+            <button
+              type="button"
+              className="checkout-primary-pill-btn"
+              style={{ width: "auto", margin: "0 auto", padding: "0 32px" }}
+              onClick={() => (navigate ? navigate("Projects") : onBackToCart())}
+            >
+              Browse Ready-Made Projects <ArrowRight size={18} />
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const confirmedTotal = confirmedOrder?.total_amount || (purchasedItems.reduce((acc, item) => acc + (projectPrice(item) || 3499), 0) || total);
+  const displayOrderId = confirmedOrder?.order_number || confirmedOrderId || "TCH-ORD-NEW";
+  const confirmedCustomerName = confirmedOrder?.customer_name || fullName || "Valued Engineer";
+  const confirmedCustomerPhone = confirmedOrder?.customer_phone || phoneNumber || "";
+  const confirmedCustomerEmail = confirmedOrder?.customer_email || emailAddress || "";
+  const confirmedAddress = confirmedOrder?.shipping_address || {
+    addressLine1,
+    addressLine2,
+    city,
+    state,
+    pincode,
+  };
+  const expectedDeliveryDate = confirmedOrder?.expected_delivery_date
+    ? new Date(confirmedOrder.expected_delivery_date)
+    : new Date(Date.now() + 7 * 86400000);
+  const formattedExpectedDelivery = new Intl.DateTimeFormat("en-IN", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(expectedDeliveryDate);
+
+  return (
+    <main className="checkout-experience-page">
+      <div className="checkout-page-container">
+        {/* Step 4: Zepto / Redbus / Aha Order Confirmation View */}
+        {step === "confirmation" ? (
+          <section className="order-confirmation-view">
+            {/* Zepto-Style Auto Navigation Banner */}
+            <div className="zepto-autonav-banner">
+              <div className="zepto-autonav-text">
+                <Sparkles size={18} color="#EA580C" />
+                <span>
+                  Order Confirmed! Directing you to Live Order Details in{" "}
+                  <strong style={{ color: "#EA580C" }}>{detailCountdown}s</strong>
+                </span>
+              </div>
+              <div className="zepto-autonav-actions">
+                <button
+                  type="button"
+                  className="zepto-autonav-btn-primary"
+                  onClick={goToOrderDetails}
+                >
+                  <PackageCheck size={14} /> View Details Now <ArrowRight size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="zepto-autonav-btn-ghost"
+                  onClick={() => setCountdownPaused((p) => !p)}
+                >
+                  {countdownPaused ? "Resume Countdown" : "Stay on Receipt"}
+                </button>
+              </div>
+            </div>
+
+            {/* Glowing Emerald Celebration Checkmark */}
+            <div className="order-confirm-badge-icon">
+              <CheckCircle2 size={40} />
+            </div>
+
+            <h1>Order Placed Successfully! 🎉</h1>
+            <p className="order-confirm-subtitle">
+              Thank you for ordering with TechCircuit Hub! We have verified your payment of{" "}
+              <strong style={{ color: "#F97316" }}>{formatRupee(confirmedTotal)}</strong> directly in-page. Our workshop engineering team is now preparing your custom hardware kit.
+            </p>
+
+            {/* Ticket Copyable Order ID Bar */}
+            <div className="order-confirm-order-id-bar">
+              <span className="order-confirm-id-label">ORDER ID:</span>
+              <span className="order-confirm-id-value">#{displayOrderId}</span>
+              <button
+                type="button"
+                className="order-confirm-copy-btn"
+                onClick={() => handleCopyOrderId(displayOrderId)}
+              >
+                {copiedOrderId ? (
+                  <>
+                    <Check size={13} /> Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy size={13} /> Copy ID
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Zepto / Redbus Delivery Guarantee & Handcrafted Promise */}
+            <div className="order-confirm-delivery-card">
+              <div className="order-confirm-delivery-head">
+                <div className="order-confirm-delivery-promise">
+                  <div className="order-confirm-delivery-icon-box">
+                    <Wrench size={22} />
+                  </div>
+                  <div>
+                    <h4 className="order-confirm-delivery-title">Handcrafted Built-to-Order (~7 Days)</h4>
+                    <p className="order-confirm-delivery-sub">
+                      Assembled by hardware engineers, firmware flashed &amp; 48-hour QC tested
+                    </p>
+                  </div>
+                </div>
+                <div className="order-confirm-eta-badge">
+                  <span className="order-confirm-eta-label">Estimated Delivery By</span>
+                  <strong className="order-confirm-eta-date">{formattedExpectedDelivery}</strong>
+                </div>
+              </div>
+
+              {/* Live 6-Stage Progress Stepper Preview */}
+              <div className="order-confirm-stepper">
+                <div className="order-confirm-step-node">
+                  <div className="order-confirm-step-dot completed"><Check size={12} /></div>
+                  <span className="order-confirm-step-label">Order Placed</span>
+                </div>
+                <div className="order-confirm-step-node">
+                  <div className="order-confirm-step-dot completed"><Check size={12} /></div>
+                  <span className="order-confirm-step-label">Confirmed</span>
+                </div>
+                <div className="order-confirm-step-node">
+                  <div className="order-confirm-step-dot in-progress">3</div>
+                  <span className="order-confirm-step-label">Building</span>
+                </div>
+                <div className="order-confirm-step-node">
+                  <div className="order-confirm-step-dot pending">4</div>
+                  <span className="order-confirm-step-label">QC Testing</span>
+                </div>
+                <div className="order-confirm-step-node">
+                  <div className="order-confirm-step-dot pending">5</div>
+                  <span className="order-confirm-step-label">Packed</span>
+                </div>
+                <div className="order-confirm-step-node">
+                  <div className="order-confirm-step-dot pending">6</div>
+                  <span className="order-confirm-step-label">Delivered</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Ordered Items & Delivery Address Breakdown */}
+            <div className="order-confirm-details-grid">
+              {/* Ordered Items Subcard */}
+              <div className="order-confirm-subcard">
+                <h4>
+                  <PackageCheck size={16} color="#F97316" /> Ordered Kit Details ({purchasedItems.length})
+                </h4>
+                <div style={{ maxHeight: "170px", overflowY: "auto", marginBottom: "12px" }}>
+                  {purchasedItems.map((item) => (
+                    <div className="order-confirm-item-mini" key={item.id}>
+                      <img
+                        src={item.imageUrl || internshipOpportunityImage}
+                        alt={item.title}
+                      />
+                      <div className="order-confirm-item-info">
+                        <strong>{item.title}</strong>
+                        <span>Qty: 1 • Full Kit with Source Code &amp; PCB</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ borderTop: "1px dashed #CBD5E1", paddingTop: "10px", display: "flex", justifyContent: "space-between", fontSize: "13px" }}>
+                  <span style={{ color: "#64748B" }}>Total Paid:</span>
+                  <strong style={{ color: "#16A34A", fontSize: "14px" }}>
+                    {formatRupee(confirmedTotal)} (PAID via Cashfree)
+                  </strong>
+                </div>
+              </div>
+
+              {/* Delivery Address Subcard */}
+              <div className="order-confirm-subcard">
+                <h4>
+                  <MapPin size={16} color="#F97316" /> Delivery Address
+                </h4>
+                <p style={{ margin: "0 0 4px", fontSize: "13.5px", fontWeight: 700, color: "#0F1F3D" }}>
+                  {confirmedCustomerName} ({confirmedCustomerPhone})
+                </p>
+                <p style={{ margin: "0 0 10px", fontSize: "13px", color: "#475569", lineHeight: 1.4 }}>
+                  {confirmedAddress.addressLine1}
+                  {confirmedAddress.addressLine2 ? `, ${confirmedAddress.addressLine2}` : ""}
+                  <br />
+                  {confirmedAddress.city}, {confirmedAddress.state} - <strong>{confirmedAddress.pincode}</strong>
+                </p>
+                <div style={{ borderTop: "1px dashed #CBD5E1", paddingTop: "8px", fontSize: "12px", color: "#64748B" }}>
+                  Confirmation sent to: <strong>{confirmedCustomerEmail || "your email"}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", gap: "14px", justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="checkout-primary-pill-btn"
+                style={{ width: "auto", padding: "0 32px" }}
+                onClick={goToOrderDetails}
+              >
+                <PackageCheck size={18} /> View Order Details &amp; Live Build Tracking
+              </button>
+              <button
+                type="button"
+                className="button button-outline"
+                style={{ borderRadius: "999px", height: "52px", padding: "0 24px" }}
+                onClick={() => (navigate ? navigate("Projects") : onBackToCart())}
+              >
+                Continue Exploring Projects <ArrowRight size={16} />
+              </button>
+            </div>
+          </section>
+        ) : (
+          <>
+            {/* Top Back Navigation Link */}
+            {step === "delivery" && (
+              <button className="checkout-top-nav-link" type="button" onClick={onBackToCart}>
+                <ArrowLeft size={16} /> Back to Shipping
+              </button>
+            )}
+            {step === "summary" && (
+              <button className="checkout-top-nav-link" type="button" onClick={() => setStep("delivery")}>
+                <ArrowLeft size={16} /> Back to Delivery Address
+              </button>
+            )}
+            {step === "payment" && (
+              <button className="checkout-top-nav-link" type="button" onClick={() => setStep("summary")}>
+                <ArrowLeft size={16} /> Back to Order Summary
+              </button>
+            )}
+
+            {/* Mobile collapsible summary shown above the form */}
+            <div className="mobile-only-summary-container" style={{ display: "none" }}>
+              {renderOrderSummaryCard(true)}
+            </div>
+
+            {/* Main Header (Image 3) */}
+            {step === "delivery" && (
+              <header className="checkout-main-header">
+                <div className="checkout-main-header-icon">
+                  <MapPin size={34} />
+                </div>
+                <div className="checkout-main-header-copy">
+                  <h1>Delivery Address</h1>
+                  <p>Enter your shipping address where you want your order to be delivered.</p>
+                </div>
+              </header>
+            )}
+
+            {step === "summary" && (
+              <header className="checkout-main-header">
+                <div className="checkout-main-header-icon">
+                  <ShoppingCart size={34} />
+                </div>
+                <div className="checkout-main-header-copy">
+                  <h1>Review Your Order</h1>
+                  <p>Please review your shipping details and items before confirming payment.</p>
+                </div>
+              </header>
+            )}
+
+            {/* Two-column Grid Layout */}
+            <div className="checkout-grid">
+              {/* Left Column (65%) */}
+              <div>
+                {/* PAGE 1: DELIVERY ADDRESS (IMAGE 3) */}
+                {step === "delivery" && (
+                  <div className="checkout-panel">
+                    <div className="checkout-panel-header">
+                      <div className="checkout-panel-icon">
+                        <MapPin size={18} />
+                      </div>
+                      <h2 className="checkout-panel-title">Address Details</h2>
+                    </div>
+
+                    <form onSubmit={handleContinueToSummary} noValidate>
+                      {/* Radio Cards: Use saved address vs Add new address */}
+                      <fieldset className="checkout-radio-fieldset">
+                        <legend className="sr-only">Choose address type</legend>
+                        <div className="checkout-radio-row">
+                          <label
+                            className={`checkout-radio-card ${addressMode === "saved" ? "selected" : ""}`}
+                            onClick={() => handleAddressModeChange("saved")}
+                          >
+                            <input
+                              type="radio"
+                              name="addressType"
+                              value="saved"
+                              checked={addressMode === "saved"}
+                              onChange={() => handleAddressModeChange("saved")}
+                            />
+                            <div className="checkout-radio-content">
+                              <div className="checkout-radio-avatar">
+                                <UserIcon size={17} />
+                              </div>
+                              <div className="checkout-radio-label-text">
+                                <strong>Use my saved address</strong>
+                                <small>(From your profile)</small>
+                              </div>
+                            </div>
+                            <div className="checkout-radio-circle">
+                              {addressMode === "saved" && <div className="checkout-radio-inner-dot" />}
+                            </div>
+                          </label>
+
+                          <label
+                            className={`checkout-radio-card ${addressMode === "new" ? "selected" : ""}`}
+                            onClick={() => handleAddressModeChange("new")}
+                          >
+                            <input
+                              type="radio"
+                              name="addressType"
+                              value="new"
+                              checked={addressMode === "new"}
+                              onChange={() => handleAddressModeChange("new")}
+                            />
+                            <div className="checkout-radio-content">
+                              <div className="checkout-radio-avatar">
+                                <Plus size={17} />
+                              </div>
+                              <div className="checkout-radio-label-text">
+                                <strong>Add new address</strong>
+                                <small>(Enter different address)</small>
+                              </div>
+                            </div>
+                            <div className="checkout-radio-circle">
+                              {addressMode === "new" && <div className="checkout-radio-inner-dot" />}
+                            </div>
+                          </label>
+                        </div>
+                      </fieldset>
+
+                      {/* Fields */}
+                      <div className="checkout-fields-container">
+                        {/* Full Name */}
+                        <div className="checkout-form-group">
+                          <label className="checkout-field-label" htmlFor="checkout-full-name">
+                            Full Name <span className="checkout-field-required">*</span>
+                          </label>
+                          <div className="checkout-input-wrapper">
+                            <UserIcon size={18} className="checkout-leading-icon" />
+                            <input
+                              id="checkout-full-name"
+                              name="fullName"
+                              type="text"
+                              autoComplete="name"
+                              required
+                              placeholder="Mohamed Riham"
+                              className={`checkout-input-field ${fieldErrors.fullName ? "has-error" : ""}`}
+                              value={fullName}
+                              onChange={(e) => {
+                                setFullName(e.target.value);
+                                if (fieldErrors.fullName) setFieldErrors((prev) => ({ ...prev, fullName: "" }));
+                              }}
+                            />
+                          </div>
+                          {fieldErrors.fullName && (
+                            <p className="checkout-field-error-msg" role="alert">{fieldErrors.fullName}</p>
+                          )}
+                        </div>
+
+                        {/* Phone Number */}
+                        <div className="checkout-form-group">
+                          <label className="checkout-field-label" htmlFor="checkout-phone-number">
+                            Phone Number <span className="checkout-field-required">*</span>
+                          </label>
+                          <div className="checkout-input-wrapper">
+                            <Phone size={18} className="checkout-leading-icon" />
+                            <input
+                              id="checkout-phone-number"
+                              name="phone"
+                              type="tel"
+                              autoComplete="tel"
+                              inputMode="tel"
+                              required
+                              placeholder="+91 98765 43210"
+                              className={`checkout-input-field ${fieldErrors.phoneNumber ? "has-error" : ""}`}
+                              value={phoneNumber}
+                              onChange={(e) => {
+                                setPhoneNumber(e.target.value);
+                                if (fieldErrors.phoneNumber) setFieldErrors((prev) => ({ ...prev, phoneNumber: "" }));
+                              }}
+                            />
+                          </div>
+                          {fieldErrors.phoneNumber && (
+                            <p className="checkout-field-error-msg" role="alert">{fieldErrors.phoneNumber}</p>
+                          )}
+                        </div>
+
+                        {/* Email Address (READ-ONLY) */}
+                        <div className="checkout-form-group">
+                          <label className="checkout-field-label" htmlFor="checkout-email-address">
+                            Email Address <span className="checkout-field-required">*</span>
+                          </label>
+                          <div className="checkout-input-wrapper">
+                            <Mail size={18} className="checkout-leading-icon" />
+                            <input
+                              id="checkout-email-address"
+                              name="email"
+                              type="email"
+                              autoComplete="email"
+                              readOnly
+                              required
+                              value={emailAddress}
+                              className="checkout-input-field is-readonly"
+                              title="Email address is associated with your signed-in account and cannot be modified here."
+                            />
+                          </div>
+                        </div>
+
+                        {/* Address Line 1 */}
+                        <div className="checkout-form-group">
+                          <label className="checkout-field-label" htmlFor="checkout-address-line1">
+                            Address Line 1 <span className="checkout-field-required">*</span>
+                          </label>
+                          <div className="checkout-input-wrapper">
+                            <Home size={18} className="checkout-leading-icon" />
+                            <input
+                              id="checkout-address-line1"
+                              name="addressLine1"
+                              type="text"
+                              autoComplete="address-line1"
+                              required
+                              placeholder="123, Tech Street"
+                              className={`checkout-input-field ${fieldErrors.addressLine1 ? "has-error" : ""}`}
+                              value={addressLine1}
+                              onChange={(e) => {
+                                setAddressLine1(e.target.value);
+                                if (fieldErrors.addressLine1) setFieldErrors((prev) => ({ ...prev, addressLine1: "" }));
+                              }}
+                            />
+                          </div>
+                          {fieldErrors.addressLine1 && (
+                            <p className="checkout-field-error-msg" role="alert">{fieldErrors.addressLine1}</p>
+                          )}
+                        </div>
+
+                        {/* Address Line 2 */}
+                        <div className="checkout-form-group">
+                          <label className="checkout-field-label" htmlFor="checkout-address-line2">
+                            Address Line 2 (Optional)
+                          </label>
+                          <div className="checkout-input-wrapper">
+                            <Building size={18} className="checkout-leading-icon" />
+                            <input
+                              id="checkout-address-line2"
+                              name="addressLine2"
+                              type="text"
+                              autoComplete="address-line2"
+                              placeholder="Near Anna Nagar"
+                              className="checkout-input-field"
+                              value={addressLine2}
+                              onChange={(e) => setAddressLine2(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        {/* City and State side by side */}
+                        <div className="checkout-grid-2col">
+                          <div className="checkout-form-group">
+                            <label className="checkout-field-label" htmlFor="checkout-city">
+                              City <span className="checkout-field-required">*</span>
+                            </label>
+                            <div className="checkout-input-wrapper">
+                              <MapPin size={18} className="checkout-leading-icon" />
+                              <input
+                                id="checkout-city"
+                                name="city"
+                                type="text"
+                                autoComplete="address-level2"
+                                required
+                                placeholder="Chennai"
+                                className={`checkout-input-field ${fieldErrors.city ? "has-error" : ""}`}
+                                value={city}
+                                onChange={(e) => {
+                                  setCity(e.target.value);
+                                  if (fieldErrors.city) setFieldErrors((prev) => ({ ...prev, city: "" }));
+                                }}
+                              />
+                            </div>
+                            {fieldErrors.city && (
+                              <p className="checkout-field-error-msg" role="alert">{fieldErrors.city}</p>
+                            )}
+                          </div>
+
+                          <div className="checkout-form-group">
+                            <label className="checkout-field-label" htmlFor="checkout-state">
+                              State <span className="checkout-field-required">*</span>
+                            </label>
+                            <div className="checkout-input-wrapper">
+                              <MapPin size={18} className="checkout-leading-icon" />
+                              <select
+                                id="checkout-state"
+                                name="state"
+                                autoComplete="address-level1"
+                                required
+                                className="checkout-input-field checkout-select-field"
+                                value={state}
+                                onChange={(e) => setState(e.target.value)}
+                              >
+                                {INDIAN_STATES_AND_UTS.map((st) => (
+                                  <option key={st} value={st}>
+                                    {st}
+                                  </option>
+                                ))}
+                              </select>
+                              <ChevronDown size={18} className="checkout-select-arrow" />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Pincode */}
+                        <div className="checkout-form-group">
+                          <label className="checkout-field-label" htmlFor="checkout-pincode">
+                            Pincode <span className="checkout-field-required">*</span>
+                          </label>
+                          <div className="checkout-input-wrapper">
+                            <Package size={18} className="checkout-leading-icon" />
+                            <input
+                              id="checkout-pincode"
+                              name="pincode"
+                              type="text"
+                              autoComplete="postal-code"
+                              inputMode="numeric"
+                              pattern="[0-9]{6}"
+                              maxLength={6}
+                              required
+                              placeholder="600040"
+                              className={`checkout-input-field ${fieldErrors.pincode ? "has-error" : ""}`}
+                              value={pincode}
+                              onChange={(e) => {
+                                setPincode(e.target.value);
+                                if (fieldErrors.pincode) setFieldErrors((prev) => ({ ...prev, pincode: "" }));
+                              }}
+                            />
+                          </div>
+                          {fieldErrors.pincode && (
+                            <p className="checkout-field-error-msg" role="alert">{fieldErrors.pincode}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Peach Strip: Save this address for future orders */}
+                      <label className="checkout-save-address-strip">
+                        <input
+                          type="checkbox"
+                          className="checkout-save-checkbox"
+                          checked={saveForFuture}
+                          onChange={(e) => setSaveForFuture(e.target.checked)}
+                        />
+                        <span>Save this address for future orders</span>
+                      </label>
+
+                      {/* Action Button */}
+                      <button className="checkout-primary-pill-btn" type="submit">
+                        <Truck size={18} /> Continue to Order Summary <ArrowRight size={18} />
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+                {/* STEP 2: ORDER SUMMARY REVIEW STEP */}
+                {step === "summary" && (
+                  <div className="checkout-panel">
+                    <div className="checkout-panel-header">
+                      <div className="checkout-panel-icon">
+                        <FileText size={18} />
+                      </div>
+                      <h2 className="checkout-panel-title">Order & Address Verification</h2>
+                    </div>
+
+                    <div className="order-review-address-card">
+                      <div>
+                        <h4>
+                          <MapPin size={16} color="#F97316" /> Shipping To: {fullName}
+                        </h4>
+                        <p>
+                          {addressLine1}{addressLine2 ? `, ${addressLine2}` : ""}, {city}, {state} - <strong>{pincode}</strong>
+                        </p>
+                        <p style={{ marginTop: "4px" }}>
+                          Mobile: <strong>{phoneNumber}</strong> • Email: <strong>{emailAddress}</strong>
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="order-review-edit-btn"
+                        onClick={() => setStep("delivery")}
+                      >
+                        Edit
+                      </button>
+                    </div>
+
+                    <div style={{ marginBottom: "24px" }}>
+                      <h3 style={{ fontSize: "15px", color: "#0F1F3D", marginBottom: "12px", fontWeight: 700 }}>
+                        Hardware Kit Package
+                      </h3>
+                      {displayItems.map((item) => (
+                        <div
+                          key={item.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "14px",
+                            padding: "12px 14px",
+                            background: "#F8FAFC",
+                            borderRadius: "10px",
+                            marginBottom: "10px",
+                          }}
+                        >
+                          <img
+                            src={item.imageUrl || internshipOpportunityImage}
+                            alt={item.title}
+                            style={{ width: "48px", height: "48px", borderRadius: "8px", objectFit: "cover" }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <strong style={{ fontSize: "13.5px", color: "#0F1F3D", display: "block" }}>{item.title}</strong>
+                            <small style={{ color: "#64748B" }}>Ready-to-run project kit • 1 Year Component Warranty</small>
+                          </div>
+                          <span style={{ fontWeight: 700, color: "#0F1F3D" }}>{formatRupee(projectPrice(item) || 3499)}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      className="checkout-primary-pill-btn"
+                      type="button"
+                      onClick={() => {
+                        setStep("payment");
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                    >
+                      <CreditCard size={18} /> Proceed to Payment <ArrowRight size={18} />
+                    </button>
+                  </div>
+                )}
+
+                {/* PAGE 2: PAYMENT METHOD (IMAGE 2) */}
+                {step === "payment" && (
+                  <div className="checkout-panel">
+                    <div className="checkout-panel-header">
+                      <div className="checkout-panel-icon">
+                        <CreditCard size={18} />
+                      </div>
+                      <h2 className="checkout-panel-title">Select Payment Method</h2>
+                    </div>
+
+                    <fieldset className="checkout-radio-fieldset">
+                      <legend className="sr-only">Choose payment method</legend>
+                      <div className="payment-methods-stack">
+                        {/* Option 1: Credit / Debit Card (Selected by default) */}
+                        <label
+                          className={`payment-method-card ${paymentMethod === "card" ? "selected" : ""}`}
+                          onClick={() => setPaymentMethod("card")}
+                        >
+                          <input
+                            type="radio"
+                            name="paymentOption"
+                            value="card"
+                            checked={paymentMethod === "card"}
+                            onChange={() => setPaymentMethod("card")}
+                          />
+                          <div className="payment-method-left">
+                            <div className="checkout-radio-circle">
+                              {paymentMethod === "card" && <div className="checkout-radio-inner-dot" />}
+                            </div>
+                            <div className="checkout-radio-avatar" style={{ background: paymentMethod === "card" ? "#FFE6D5" : "#F8FAFC", color: paymentMethod === "card" ? "#F97316" : "#64748B" }}>
+                              <CreditCard size={18} />
+                            </div>
+                            <div className="payment-method-text">
+                              <strong>Credit / Debit Card</strong>
+                              <small>Visa, Mastercard, RuPay (In-Page Secure)</small>
+                            </div>
+                          </div>
+                          <div className="payment-partner-logos">
+                            <VisaLogo />
+                            <MastercardLogo />
+                            <RuPayLogo />
+                          </div>
+                        </label>
+
+                        {/* Cashfree Secure Card Elements Container */}
+                        {paymentMethod === "card" && (
+                          <div
+                            className="cf-card-elements-wrapper"
+                            style={{
+                              marginTop: "-8px",
+                              marginBottom: "12px",
+                              display: "grid",
+                              gap: "12px",
+                              background: "#FFFFFF",
+                              padding: "18px",
+                              borderRadius: "14px",
+                              border: "1.5px solid #F97316",
+                              boxShadow: "0 2px 8px rgba(249, 115, 22, 0.08)",
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div>
+                              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#0F1F3D", marginBottom: "6px" }}>
+                                Card Number <span style={{ color: "#EF4444" }}>*</span>
+                              </label>
+                              <div id="cf-card-number" className="cf-element-container" style={{ minHeight: "44px" }} />
+                            </div>
+                            <div>
+                              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#0F1F3D", marginBottom: "6px" }}>
+                                Name on Card <span style={{ color: "#EF4444" }}>*</span>
+                              </label>
+                              <div id="cf-card-holder" className="cf-element-container" style={{ minHeight: "44px" }} />
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                              <div>
+                                <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#0F1F3D", marginBottom: "6px" }}>
+                                  Expiry (MM/YY) <span style={{ color: "#EF4444" }}>*</span>
+                                </label>
+                                <div id="cf-card-expiry" className="cf-element-container" style={{ minHeight: "44px" }} />
+                              </div>
+                              <div>
+                                <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#0F1F3D", marginBottom: "6px" }}>
+                                  CVV <span style={{ color: "#EF4444" }}>*</span>
+                                </label>
+                                <div id="cf-card-cvv" className="cf-element-container" style={{ minHeight: "44px" }} />
+                              </div>
+                            </div>
+                            <div style={{ fontSize: "11.5px", color: "#64748B", display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                              <ShieldCheck size={14} color="#16A34A" /> Encrypted directly via Cashfree Web Element SDK. No card details touch our servers.
+                            </div>
+                            {((import.meta.env.VITE_CASHFREE_ENV as string) || "sandbox") === "sandbox" && (
+                              <div style={{ background: "#FFF7ED", border: "1px dashed #F97316", borderRadius: "8px", padding: "10px 12px", fontSize: "12px", color: "#9A3412", marginTop: "4px" }}>
+                                <div style={{ fontWeight: 700, marginBottom: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                                  <Sparkles size={14} color="#F97316" /> Cashfree Sandbox Test Card:
+                                </div>
+                                <div style={{ lineHeight: 1.5 }}>
+                                  Card: <strong>4706 1312 1121 2123</strong> (Visa Debit) or <strong>4444 3333 2222 1111</strong> (Visa Credit)<br />
+                                  Expiry: <strong>12/28</strong> • CVV: <strong>123</strong> • Test OTP: <strong>111000</strong>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Option 2: UPI */}
+                        <label
+                          className={`payment-method-card ${paymentMethod === "upi" ? "selected" : ""}`}
+                          onClick={() => setPaymentMethod("upi")}
+                        >
+                          <input
+                            type="radio"
+                            name="paymentOption"
+                            value="upi"
+                            checked={paymentMethod === "upi"}
+                            onChange={() => setPaymentMethod("upi")}
+                          />
+                          <div className="payment-method-left">
+                            <div className="checkout-radio-circle">
+                              {paymentMethod === "upi" && <div className="checkout-radio-inner-dot" />}
+                            </div>
+                            <div className="checkout-radio-avatar" style={{ background: paymentMethod === "upi" ? "#FFE6D5" : "#F8FAFC", color: paymentMethod === "upi" ? "#F97316" : "#64748B" }}>
+                              <UpiIconBadge />
+                            </div>
+                            <div className="payment-method-text">
+                              <strong>UPI Instant Collect</strong>
+                              <small>Google Pay, PhonePe, Paytm, BHIM</small>
+                            </div>
+                          </div>
+                          <div className="payment-partner-logos">
+                            <GooglePayLogo />
+                            <PhonePeLogo />
+                            <PaytmLogo />
+                          </div>
+                        </label>
+
+                        {/* Cashfree Secure UPI Component Container */}
+                        {paymentMethod === "upi" && (
+                          <div
+                            className="cf-upi-elements-wrapper"
+                            style={{
+                              marginTop: "-8px",
+                              marginBottom: "12px",
+                              display: "grid",
+                              gap: "12px",
+                              background: "#FFFFFF",
+                              padding: "18px",
+                              borderRadius: "14px",
+                              border: "1.5px solid #F97316",
+                              boxShadow: "0 2px 8px rgba(249, 115, 22, 0.08)",
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div>
+                              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#0F1F3D", marginBottom: "6px" }}>
+                                Virtual Payment Address (UPI ID) <span style={{ color: "#EF4444" }}>*</span>
+                              </label>
+                              <div id="cf-upi-collect" className="cf-element-container" style={{ minHeight: "44px" }} />
+                              <small style={{ color: "#64748B", fontSize: "12px", marginTop: "6px", display: "block" }}>
+                                Enter your UPI ID (e.g. mobile@upi, username@okhdfcbank). You will approve the collect request on your phone.
+                              </small>
+                            </div>
+
+                            {((import.meta.env.VITE_CASHFREE_ENV as string) || "sandbox") === "sandbox" && (
+                              <div style={{ background: "#FFF7ED", border: "1px dashed #F97316", borderRadius: "8px", padding: "10px 12px", fontSize: "12px", color: "#9A3412" }}>
+                                <div style={{ fontWeight: 700, marginBottom: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                                  <Sparkles size={14} color="#F97316" /> Cashfree Sandbox Test UPI ID:
+                                </div>
+                                <div>
+                                  UPI ID: <strong>success@upi</strong> (simulates an approved payment)
+                                </div>
+                              </div>
+                            )}
+
+                            {upiAwaiting && (
+                              <div
+                                className="upi-awaiting-container"
+                                role="status"
+                                aria-live="polite"
+                                style={{
+                                  background: "#FFF7ED",
+                                  border: "1px solid #FDBA74",
+                                  padding: "16px",
+                                  borderRadius: "12px",
+                                  textAlign: "center",
+                                  marginTop: "8px",
+                                }}
+                              >
+                                <div className="upi-spinner" style={{ margin: "0 auto 10px" }} />
+                                <h4 style={{ margin: "0 0 6px", fontSize: "14.5px", color: "#0F1F3D", fontWeight: 700 }}>
+                                  Approve payment request in your UPI app
+                                </h4>
+                                <p style={{ margin: "0 0 10px", fontSize: "13px", color: "#475569" }}>
+                                  Cashfree sent a payment request to your UPI app. Please open Google Pay, PhonePe, or Paytm and authorize the payment.
+                                </p>
+                                <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#EA580C", marginBottom: "12px" }}>
+                                  Time remaining: {Math.floor(upiTimer / 60)}:{(upiTimer % 60).toString().padStart(2, "0")}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="button button-outline button-small"
+                                  onClick={() => {
+                                    setUpiAwaiting(false);
+                                    setSubmitting(false);
+                                  }}
+                                >
+                                  Cancel &amp; Retry
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </fieldset>
+
+                    {/* Peach SSL info strip */}
+                    <div className="payment-ssl-badge">
+                      <ShieldCheck size={20} />
+                      <span>Your payment is processed directly inside TechCircuit Hub with 256-bit SSL encryption.</span>
+                    </div>
+
+                    {paymentError && (
+                      <div
+                        className="admin-message"
+                        role="alert"
+                        style={{
+                          marginBottom: "18px",
+                          background: "#FEF2F2",
+                          border: "1px solid #FCA5A5",
+                          color: "#DC2626",
+                          padding: "12px 14px",
+                          borderRadius: "10px",
+                          fontSize: "13px",
+                        }}
+                      >
+                        {paymentError}
+                      </div>
+                    )}
+
+                    {/* Primary Button: Pay Now */}
+                    <button
+                      className="checkout-primary-pill-btn"
+                      type="button"
+                      disabled={submitting}
+                      onClick={handlePayNow}
+                    >
+                      <Lock size={18} /> {submitting ? "Processing payment…" : <>Pay Now {formatRupee(total)} <ArrowRight size={18} /></>}
+                    </button>
+
+                    {/* Consent line with interactive policy links */}
+                    <p className="payment-consent-terms">
+                      By placing this order you agree to our{" "}
+                      <button
+                        type="button"
+                        style={{ background: "none", border: 0, padding: 0, color: "#F97316", textDecoration: "underline", cursor: "pointer", fontWeight: 600 }}
+                        onClick={() => setPolicyModal("terms")}
+                      >
+                        Terms &amp; Conditions
+                      </button>
+                      ,{" "}
+                      <button
+                        type="button"
+                        style={{ background: "none", border: 0, padding: 0, color: "#F97316", textDecoration: "underline", cursor: "pointer", fontWeight: 600 }}
+                        onClick={() => setPolicyModal("delivery")}
+                      >
+                        Delivery Policy
+                      </button>
+                      {" "}and{" "}
+                      <button
+                        type="button"
+                        style={{ background: "none", border: 0, padding: 0, color: "#F97316", textDecoration: "underline", cursor: "pointer", fontWeight: 600 }}
+                        onClick={() => setPolicyModal("refund")}
+                      >
+                        Refund &amp; Cancellation Policy
+                      </button>
+                      .
+                    </p>
+
+                    {/* Policy Modal Overlay */}
+                    {policyModal && (
+                      <div className="modal-overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+                        <div
+                          className="modal-card"
+                          style={{
+                            maxWidth: "540px",
+                            background: "#fff",
+                            borderRadius: "16px",
+                            padding: "24px",
+                            boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
+                            position: "relative",
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                            <h3 style={{ margin: 0, fontSize: "18px", color: "#0F1F3D", fontWeight: 700 }}>
+                              {policyModal === "terms" && "Terms & Conditions"}
+                              {policyModal === "delivery" && "Build-to-Order Delivery Policy"}
+                              {policyModal === "refund" && "Refund & Cancellation Policy"}
+                            </h3>
+                            <button
+                              type="button"
+                              onClick={() => setPolicyModal(null)}
+                              style={{ background: "#F1F5F9", border: 0, borderRadius: "50%", width: "32px", height: "32px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+
+                          <div style={{ fontSize: "13.5px", color: "#475569", lineHeight: 1.6, maxHeight: "360px", overflowY: "auto", paddingRight: "8px" }}>
+                            {policyModal === "terms" && (
+                              <>
+                                <p>All ready-made engineering projects provided through TechCircuit Hub are built to order by our technical team.</p>
+                                <p>Each hardware kit contains fully assembled, verified circuit modules, pre-flashed microcontrollers, and comprehensive schematics and documentation for academic and practical engineering demonstrations.</p>
+                                <p>Payment must be successfully verified before workshop fabrication and component assembly begin.</p>
+                              </>
+                            )}
+
+                            {policyModal === "delivery" && (
+                              <>
+                                <p><strong>Delivery Estimate:</strong> Delivered to your address in about 7 days after payment.</p>
+                                <p>Projects are custom-crafted and thoroughly tested before courier dispatch. Live tracking updates are entered manually by our workshop engineers as each project transitions from Assembly to Testing and Courier dispatch.</p>
+                                <p>Once shipped, courier name, tracking number, and tracking URL are updated directly in your Student Dashboard.</p>
+                              </>
+                            )}
+
+                            {policyModal === "refund" && (
+                              <>
+                                <p><strong>Build-to-Order Cancellation Policy:</strong> [cancellation allowed until build starts - to be confirmed by owner].</p>
+                                <p>Because our engineering projects are custom fabricated and hand-assembled upon order placement, cancellation requests are accepted without deduction while the order is in <em>Order Placed</em> or <em>Confirmed</em> stage.</p>
+                                <p>Once manual circuit fabrication and component allocation begin in <em>Building (Processing)</em>, cancellations must be confirmed directly with the workshop administrator.</p>
+                                <p>In the event of hardware damage in transit or component failure upon delivery, full replacements or refunds are provided after inspection.</p>
+                              </>
+                            )}
+                          </div>
+
+                          <div style={{ marginTop: "20px", textAlign: "right" }}>
+                            <button
+                              type="button"
+                              className="button button-primary button-small"
+                              onClick={() => setPolicyModal(null)}
+                            >
+                              I Understand
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Centered back link */}
+                    <button
+                      type="button"
+                      className="payment-back-cart-btn"
+                      onClick={onBackToCart}
+                    >
+                      ← Back to cart
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column (35%): Sticky Order Summary Card */}
+              <div className="desktop-order-summary-column">
+                {renderOrderSummaryCard(false)}
+              </div>
+            </div>
+          </>
         )}
-      </section>
+      </div>
+
+      {/* In-Page Payment Processing Overlay */}
+      {submitting && (
+        <div className="inpage-payment-processing-overlay">
+          <div className="inpage-payment-processing-box">
+            <div className="inpage-processing-icon-spin">
+              <div className="inpage-processing-ring" />
+              <ShieldCheck size={32} />
+            </div>
+            <h3>Processing Secure Payment</h3>
+            <p>
+              Securing transaction with your bank directly inside TechCircuit Hub. Please do not refresh or close this tab.
+            </p>
+            <div className="inpage-processing-security-strip">
+              <Lock size={13} /> 256-Bit SSL Bank Grade Encryption
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
-function PaymentResultPage({
+export function PaymentResultPage({
   orderId,
   apiBaseUrl,
   cartIds,
@@ -2077,6 +4322,7 @@ function SavedPage({
   savedIds,
   toggleSaved,
   setEnquiry,
+  addProjectToCart,
   onViewListing,
   onViewResource,
 }: {
@@ -2084,6 +4330,7 @@ function SavedPage({
   savedIds: string[];
   toggleSaved: (id: string) => void;
   setEnquiry: (listing: Listing) => void;
+  addProjectToCart?: (id: string) => void;
   onViewListing: (listing: Listing) => void;
   onViewResource: (resource: Resource) => void;
 }) {
@@ -2121,7 +4368,7 @@ function SavedPage({
           <div className="empty-state"><div className="empty-icon"><Bookmark size={23} /></div><span className="eyebrow"><span className="eyebrow-line" /> BUILD YOUR SHORTLIST</span><h3>{savedCategory !== "All categories" ? "No saved items in this category." : savedView === "listings" ? "No saved listings yet." : "No saved resources yet."}</h3><p>{savedCategory !== "All categories" ? "Choose another category to view the rest of your saved items." : "Use the bookmark icon on a directory listing or learning resource to keep it here for later."}</p></div>
         ) : (
           <>
-            {savedView === "listings" ? <div className="listing-grid">{filteredListings.map((item, index) => <ListingCard key={item.id} listing={item} index={index} isSaved onSave={() => toggleSaved(item.id)} compareIds={[]} onCompare={() => undefined} onEnquire={() => setEnquiry(item)} isProjects={item.kind === "Projects"} onViewDetails={() => onViewListing(item)} />)}</div> : <div className="resource-grid saved-resources">{filteredResources.map((item) => <ResourceCard item={item} key={item.title} isSaved onSave={() => toggleSaved(resourceId(item.title))} onViewDetails={() => onViewResource(item)} />)}</div>}
+            {savedView === "listings" ? <div className="listing-grid">{filteredListings.map((item, index) => <ListingCard key={item.id} listing={item} index={index} isSaved onSave={() => toggleSaved(item.id)} compareIds={[]} onCompare={() => undefined} onEnquire={() => setEnquiry(item)} isProjects={item.kind === "Projects"} onOrderNow={addProjectToCart ? () => addProjectToCart(item.id) : undefined} onViewDetails={() => onViewListing(item)} />)}</div> : <div className="resource-grid saved-resources">{filteredResources.map((item) => <ResourceCard item={item} key={item.title} isSaved onSave={() => toggleSaved(resourceId(item.title))} onViewDetails={() => onViewResource(item)} />)}</div>}
           </>
         )}
       </section>
@@ -2156,36 +4403,55 @@ function ListingCard({
 }) {
   const live = !listing.id.startsWith("sample-");
   const isOpportunity = listing.kind === "Internships" || listing.kind === "Hackathons";
+  const ended = isOpportunity && isOpportunityEnded(listing);
   const visual = ["tile-mint", "tile-peach", "tile-blue"][index % 3];
   return (
     <article className={`listing-card${isOpportunity ? " opportunity-listing-card" : ""}`}>
       <div className={`listing-visual ${isProjects ? "project-visual" : visual}`}>
-        {isProjects && listing.imageUrl ? <button className="project-image-trigger" type="button" onClick={onViewDetails} aria-label={`View details for ${listing.title}`}><img className="project-image" src={listing.imageUrl} alt="" loading="lazy" decoding="async" /></button> : isProjects ? <button className="project-image-trigger project-image-placeholder" type="button" onClick={onViewDetails} aria-label={`View details for ${listing.title}`}><CircuitBoard size={42} /><span>Project image not provided</span></button> : isOpportunity ? (
-          <img className="opportunity-card-image" src={listing.kind === "Internships" ? internshipOpportunityImage : hackathonOpportunityImage} alt={`${listing.kind} opportunities`} loading="lazy" decoding="async" />
+        {isProjects && listing.imageUrl ? (
+          <button className="project-image-trigger" type="button" onClick={onViewDetails} aria-label={`View details for ${listing.title}`}>
+            <img className="project-image" src={listing.imageUrl} alt="" loading="lazy" decoding="async" />
+          </button>
+        ) : isProjects ? (
+          <button className="project-image-trigger project-image-placeholder" type="button" onClick={onViewDetails} aria-label={`View details for ${listing.title}`}>
+            <CircuitBoard size={42} />
+            <span>Project image not provided</span>
+          </button>
+        ) : isOpportunity ? (
+          <div style={{ position: "relative", width: "100%", height: "100%" }}>
+            <img className="opportunity-card-image" src={listing.kind === "Internships" ? internshipOpportunityImage : hackathonOpportunityImage} alt={`${listing.kind} opportunities`} loading="lazy" decoding="async" />
+            {ended && <span className="status-badge ended-badge" style={{ position: "absolute", top: 10, left: 10 }}>ENDED</span>}
+          </div>
         ) : (
           <>
-        <span className={live ? "status-badge live-badge" : "status-badge sample-badge"}>{live ? listing.verified ? "✓ VERIFIED" : "SOURCE LINKED" : "SAMPLE DATA"}</span>
-        <div className="visual-circuit"><CircuitBoard size={50} strokeWidth={1.1} /><span className="visual-orbit" /></div>
-        <span className="visual-number">TC / {String(index + 1).padStart(2, "0")}</span>
+            <span className={ended ? "status-badge ended-badge" : live ? listing.verified ? "✓ VERIFIED" : "SOURCE LINKED" : "SAMPLE DATA"}>
+              {ended ? "ENDED" : live ? listing.verified ? "✓ VERIFIED" : "SOURCE LINKED" : "SAMPLE DATA"}
+            </span>
+            <div className="visual-circuit"><CircuitBoard size={50} strokeWidth={1.1} /><span className="visual-orbit" /></div>
+            <span className="visual-number">TC / {String(index + 1).padStart(2, "0")}</span>
           </>
         )}
-        {isProjects && <span className="status-badge sample-badge project-badge">STUDENT CONCEPT</span>}
+        {isProjects && <span className="status-badge sample-badge project-badge">READY-MADE KIT</span>}
         <button className="save-button" aria-label={isSaved ? "Remove saved listing" : "Save listing"} onClick={onSave}>{isSaved ? <BookmarkCheck size={17} /> : <Bookmark size={17} />}</button>
       </div>
       <div className="listing-body">
         {isProjects && listing.projectCategory && <div className="project-category">{listing.projectCategory}</div>}
         <div className="listing-location"><MapPin size={14} /> {listing.city}</div>
-        <button className="project-title-button" type="button" onClick={onViewDetails}><h3>{listing.title}</h3></button>{isProjects && listing.projectPrice !== undefined ? <div className="project-price">{new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(listing.projectPrice)}</div> : <div className="listing-org">{listing.organization}</div>}
+        <button className="project-title-button" type="button" onClick={onViewDetails}><h3>{listing.title}</h3></button>
+        {isProjects && listing.projectPrice !== undefined ? (
+          <div className="project-price">{new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(listing.projectPrice)}</div>
+        ) : (
+          <div className="listing-org">{listing.organization}</div>
+        )}
         <p className="listing-summary">{listing.summary}</p>
         {listing.mode && <div className="listing-facts"><span><Sparkles size={13} /> {listing.mode}</span>{listing.duration && <span><Clock3 size={13} /> {listing.duration}</span>}{listing.eligibility && <span>{listing.eligibility}</span>}</div>}
         <div className="tag-row">{listing.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div>
         <div className="listing-actions">
           <button type="button" className="button button-outline button-small" onClick={onViewDetails}>View details <ArrowRight size={14} /></button>
-          {isProjects && onOrderNow && <button className="button button-dark button-small" onClick={onOrderNow}>Order now</button>}
+          {isProjects && onOrderNow && <button className="button button-dark button-small" type="button" onClick={onOrderNow}>Order now <ArrowRight size={14} /></button>}
           {!isProjects && canCompare && <button className={compareIds.includes(listing.id) ? "button button-primary button-small" : "button button-outline button-small"} onClick={onCompare}>{compareIds.includes(listing.id) ? <Check size={14} /> : <Layers3 size={14} />}{compareIds.includes(listing.id) ? "Added" : "Compare"}</button>}
           {!isProjects && !canCompare && !isOpportunity && <button className="button button-outline button-small" onClick={onEnquire}>Enquire <ArrowRight size={14} /></button>}
           {!isProjects && !listing.sourceUrl && <span className="no-contact-note">Sample profile · no contact details</span>}
-          {isProjects && <span className="no-contact-note">Concept · no provider</span>}
         </div>
       </div>
     </article>
@@ -2202,7 +4468,7 @@ function HowItWorks() {
 }
 
 function Footer({ navigate }: { navigate: (page: Page) => void }) {
-  return <footer className="site-footer"><div className="footer-main"><div className="footer-brand"><button className="brand brand-footer" onClick={() => navigate("Home")} aria-label={`${PLATFORM_NAME} home`}><img className="brand-logo" src={brandLogo} alt={PLATFORM_NAME} /></button><p>{PLATFORM_TAGLINE}<br />A clearer way into the electronics ecosystem.</p></div><div className="footer-links"><div><strong>EXPLORE</strong><button onClick={() => navigate("Products")}>Components</button><button onClick={() => navigate("Projects")}>Projects</button><button onClick={() => navigate("Internships")}>Internships</button><button onClick={() => navigate("Training")}>Training</button></div><div><strong>GET INSPIRED</strong><button onClick={() => navigate("Hackathons")}>Hackathons</button><button onClick={() => navigate("Learn")}>Resources</button><button onClick={() => navigate("Saved")}>Collection</button><button onClick={() => navigate("Admin")}>Partner portal</button></div></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} {PLATFORM_NAME} <span className="sample-dot" /> BRAND NAME EDITABLE</span><span>Built for the curious, by design.</span></div></footer>;
+  return <footer className="site-footer"><div className="footer-main"><div className="footer-brand"><button className="brand brand-footer" onClick={() => navigate("Home")} aria-label={`${PLATFORM_NAME} home`}><img className="brand-logo" src={brandLogo} alt={PLATFORM_NAME} /></button><p>{PLATFORM_TAGLINE}<br />A clearer way into the electronics ecosystem.</p></div><div className="footer-links"><div><strong>EXPLORE</strong><button onClick={() => navigate("Products")}>Components</button><button onClick={() => navigate("Projects")}>Projects</button><button onClick={() => navigate("Internships")}>Internships</button><button onClick={() => navigate("Training")}>Training</button></div><div><strong>GET INSPIRED</strong><button onClick={() => navigate("Hackathons")}>Hackathons</button><button onClick={() => navigate("Learn")}>Resources</button><button onClick={() => navigate("Saved")}>Collection</button><button onClick={() => navigate("Admin")}>Partner portal</button></div></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} {PLATFORM_NAME} <span className="sample-dot" /> TechCircuit Hub</span><span>Built for the curious, by design.</span></div></footer>;
 }
 
 function EnquiryModal({ listing, onClose }: { listing: Listing; onClose: () => void }) {
@@ -2254,6 +4520,74 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const configured = Boolean(getSupabase());
+  const modalRef = useRef<HTMLElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    const appShell = document.querySelector(".app-shell");
+    if (appShell && modalRef.current && !appShell.contains(modalRef.current)) {
+      appShell.setAttribute("aria-hidden", "true");
+      appShell.setAttribute("inert", "");
+    }
+
+    const timer = setTimeout(() => {
+      const focusables = modalRef.current?.querySelectorAll<HTMLElement>(
+        'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusables && focusables.length > 0) {
+        const firstInput = Array.from(focusables).find((el) => el.tagName === "INPUT");
+        (firstInput || focusables[0]).focus();
+      } else if (modalRef.current) {
+        modalRef.current.focus();
+      }
+    }, 50);
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key === "Tab" && modalRef.current) {
+        const focusableNodes = Array.from(
+          modalRef.current.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter((node) => node.offsetParent !== null);
+
+        if (focusableNodes.length === 0) return;
+        const firstNode = focusableNodes[0];
+        const lastNode = focusableNodes[focusableNodes.length - 1];
+
+        if (event.shiftKey) {
+          if (document.activeElement === firstNode || !modalRef.current.contains(document.activeElement)) {
+            event.preventDefault();
+            lastNode.focus();
+          }
+        } else {
+          if (document.activeElement === lastNode || !modalRef.current.contains(document.activeElement)) {
+            event.preventDefault();
+            firstNode.focus();
+          }
+        }
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("keydown", handleKeyDown);
+      if (appShell && !appShell.contains(modalRef.current)) {
+        appShell.removeAttribute("aria-hidden");
+        appShell.removeAttribute("inert");
+      }
+      if (previousFocusRef.current && typeof previousFocusRef.current.focus === "function") {
+        previousFocusRef.current.focus();
+      }
+    };
+  }, [onClose]);
 
   useEffect(() => {
     if (isPasswordRecovery) {
@@ -2309,7 +4643,7 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
           if (alreadyRegistered) {
             setMode("signin");
             setPassword("");
-            setMessage("This email already has an account. Log in with your password, continue with Google if you originally signed up with Google, or choose Forgot password.");
+            setError("This email already has an account. Log in with your password, continue with Google if you originally signed up with Google, or choose Forgot password.");
             return;
           }
           const rateLimited =
@@ -2337,8 +4671,7 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
           }
           if (signInError.code === "invalid_credentials") {
             setPassword("");
-            setMode("recover");
-            setMessage("Those sign-in details were not accepted. If you created this account with email and password, send a reset link below. If you used Google, go back to log in and choose Continue with Google.");
+            setError("Those sign-in details were not accepted. If you created this account with email and password, check your credentials or send a reset link below. If you used Google, choose Continue with Google.");
             return;
           }
           setError(
@@ -2380,12 +4713,14 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
 
   return (
     <div className="modal-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="enquiry-modal auth-modal" role="dialog" aria-modal="true" aria-labelledby="student-auth-title">
+      <section className="enquiry-modal auth-modal" ref={modalRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="student-auth-title">
         <button className="modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
-        <div className="admin-lock"><UserRound size={23} /></div>
-        <div className="eyebrow"><span className="eyebrow-line" /> STUDENT ACCOUNT</div>
-        <h2 id="student-auth-title">{mode === "signup" ? "Join the circuit." : mode === "recover" ? "Reset your password." : mode === "updatePassword" ? "Choose a new password." : "Welcome back."}</h2>
-        <p className="modal-context">{mode === "recover" ? "Enter the email address on your account and we’ll send a password reset link." : mode === "updatePassword" ? "Choose a new password for your student account." : "Create an account or log in. Complete your student profile the first time you enter."}</p>
+        <div className="student-auth-logo-wrap">
+          <img className="student-auth-logo" src={brandLogo} alt={PLATFORM_NAME} />
+        </div>
+        <div className="eyebrow" style={{ textAlign: "center" }}><span className="eyebrow-line" /> STUDENT ACCOUNT</div>
+        <h2 id="student-auth-title" style={{ textAlign: "center" }}>{mode === "signup" ? "Join the circuit." : mode === "recover" ? "Reset your password." : mode === "updatePassword" ? "Choose a new password." : "Welcome back."}</h2>
+        <p className="modal-context" style={{ textAlign: "center" }}>{mode === "recover" ? "Enter the email address on your account and we’ll send a password reset link." : mode === "updatePassword" ? "Choose a new password for your student account." : "Create an account or log in. Complete your student profile the first time you enter."}</p>
         {!isPasswordRecovery && mode !== "recover" && <div className="auth-mode-tabs" role="tablist" aria-label="Student account action">
           <button type="button" role="tab" aria-selected={mode === "signup"} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); setMessage(""); }}>Create account</button>
           <button type="button" role="tab" aria-selected={mode === "signin"} className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setError(""); setMessage(""); }}>Log in</button>
@@ -2397,12 +4732,19 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
           {mode !== "recover" && <label>{mode === "updatePassword" ? "New password" : "Password"}<input required type="password" minLength={6} autoComplete={mode === "signin" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" /></label>}
           {mode === "updatePassword" && <label>Confirm new password<input required type="password" minLength={6} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter the new password again" /></label>}
           {mode === "signin" && <button className="auth-recovery-link" type="button" onClick={() => { setMode("recover"); setError(""); setMessage(""); }}>Forgot password?</button>}
-          {error && <div className="admin-message" role="alert">{error}</div>}
+          {error && (
+            <div className="auth-error-alert" role="alert">
+              <AlertCircle size={16} />
+              <span>{error}</span>
+            </div>
+          )}
           {message && <div className="auth-success" role="status">{message}</div>}
-          {configured && <button className="button button-dark" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "signup" ? "Create student account" : mode === "recover" ? "Send reset link" : mode === "updatePassword" ? "Update password" : "Sign in"} <ArrowRight size={15} /></button>}
+          <button className="button button-dark" type="submit" disabled={busy}>
+            {busy ? "Please wait…" : mode === "signup" ? "Create student account" : mode === "recover" ? "Send reset link" : mode === "updatePassword" ? "Update password" : "Sign in"} <ArrowRight size={15} />
+          </button>
         </form>
         {(mode === "recover" || mode === "updatePassword") && <button className="auth-recovery-link" type="button" onClick={() => { setMode("signin"); setError(""); setMessage(""); }}>Back to log in</button>}
-        {configured && (mode === "signin" || mode === "signup") && (
+        {(mode === "signin" || mode === "signup") && (
           <>
             <div className="auth-divider" aria-hidden="true"><span>OR</span></div>
             <button className="button button-outline google-auth-button" type="button" onClick={signInWithGoogle} disabled={busy}>
@@ -2421,28 +4763,235 @@ function OpportunityReturnPrompt({
   busy,
   error,
   onChoose,
+  onDismiss,
+  student,
+  onSignIn,
 }: {
   listing: Listing;
   busy: boolean;
   error: string;
   onChoose: (status: OpportunityActivityStatus) => void;
+  onDismiss?: () => void;
+  student?: User | null;
+  onSignIn?: () => void;
 }) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    previousFocus.current = document.activeElement as HTMLElement | null;
+    const firstBtn = modalRef.current?.querySelector<HTMLButtonElement>("button");
+    firstBtn?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onDismiss?.();
+      } else if (e.key === "Tab" && modalRef.current) {
+        const focusables = modalRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      if (previousFocus.current && typeof previousFocus.current.focus === "function") {
+        previousFocus.current.focus();
+      }
+    };
+  }, [onDismiss]);
+
   return (
-    <div className="modal-overlay opportunity-return-overlay" role="presentation">
-      <section className="enquiry-modal opportunity-return-modal" role="dialog" aria-modal="true" aria-labelledby="opportunity-return-title">
-        <div className="admin-lock"><BriefcaseBusiness size={23} /></div>
-        <div className="eyebrow"><span className="eyebrow-line" /> OPPORTUNITY FOLLOW-UP</div>
-        <h2 id="opportunity-return-title">Did you apply or register?</h2>
-        <p className="modal-context"><strong>{listing.title}</strong> from {listing.organization}. Your answer is saved privately to your student account; the provider does not confirm it.</p>
-        {error && <div className="admin-message" role="alert">{error}</div>}
-        <div className="opportunity-return-actions">
-          <button className="button button-primary" type="button" disabled={busy} onClick={() => onChoose("applied")}>
-            {busy ? "Saving…" : "Yes, mark as applied"}
-          </button>
-          <button className="button button-outline" type="button" disabled={busy} onClick={() => onChoose("visited")}>
-            Just visited
-          </button>
+    <div
+      className="modal-overlay opportunity-return-overlay"
+      role="presentation"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && onDismiss) onDismiss();
+      }}
+    >
+      <section
+        ref={modalRef}
+        className="enquiry-modal opportunity-return-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="opportunity-return-title"
+      >
+        <div className="opportunity-return-icon-box">
+          <BriefcaseBusiness size={24} />
         </div>
+        <div
+          className="eyebrow"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            color: "#F97316",
+            fontWeight: 700,
+            fontSize: "11px",
+            letterSpacing: "0.06em",
+            margin: "12px 0 6px",
+          }}
+        >
+          <span style={{ width: "16px", height: "2px", background: "#F97316", borderRadius: "1px", display: "inline-block" }} />
+          OPPORTUNITY FOLLOW-UP
+        </div>
+        <h2
+          id="opportunity-return-title"
+          style={{
+            fontSize: "20px",
+            fontWeight: 800,
+            color: "#0F1F3D",
+            margin: "0 0 10px",
+            lineHeight: 1.3,
+          }}
+        >
+          Did you apply or register?
+        </h2>
+        <p
+          className="modal-context"
+          style={{
+            fontSize: "13.5px",
+            color: "#64748B",
+            lineHeight: 1.55,
+            margin: "0 0 24px",
+          }}
+        >
+          <strong style={{ color: "#0F1F3D", fontWeight: 700 }}>{listing.title}</strong> from {listing.organization}. Your answer is saved privately to your student account; the provider does not confirm it.
+        </p>
+        {error && <div className="admin-message" role="alert" style={{ marginBottom: "16px" }}>{error}</div>}
+        
+        {student ? (
+          <div className="opportunity-return-actions" style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              className="button button-primary"
+              type="button"
+              disabled={busy}
+              onClick={() => onChoose("applied")}
+              style={{
+                height: "46px",
+                borderRadius: "999px",
+                background: "#F97316",
+                color: "#FFFFFF",
+                fontWeight: 700,
+                padding: "0 24px",
+                border: 0,
+                cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(249, 115, 22, 0.28)",
+              }}
+            >
+              {busy ? "Saving…" : "Yes, mark as applied"}
+            </button>
+            <button
+              className="button button-outline"
+              type="button"
+              disabled={busy}
+              onClick={() => onChoose("visited")}
+              style={{
+                height: "46px",
+                borderRadius: "999px",
+                border: "1.5px solid #E2E8F0",
+                color: "#0F1F3D",
+                fontWeight: 600,
+                padding: "0 24px",
+                background: "#FFFFFF",
+                cursor: "pointer",
+              }}
+            >
+              Just visited
+            </button>
+            {onDismiss && (
+              <button
+                type="button"
+                onClick={onDismiss}
+                style={{
+                  background: "transparent",
+                  border: 0,
+                  color: "#64748B",
+                  fontSize: "12.5px",
+                  cursor: "pointer",
+                  padding: "8px 12px",
+                  textDecoration: "underline",
+                  width: "100%",
+                  textAlign: "center",
+                  marginTop: "4px",
+                }}
+              >
+                Ask me later
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="opportunity-return-actions" style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+            {onSignIn && (
+              <button
+                className="button button-primary"
+                type="button"
+                onClick={onSignIn}
+                style={{
+                  height: "46px",
+                  borderRadius: "999px",
+                  background: "#F97316",
+                  color: "#FFFFFF",
+                  fontWeight: 700,
+                  padding: "0 24px",
+                  border: 0,
+                  cursor: "pointer",
+                  boxShadow: "0 4px 14px rgba(249, 115, 22, 0.28)",
+                }}
+              >
+                Sign in to track your applications
+              </button>
+            )}
+            <button
+              className="button button-outline"
+              type="button"
+              onClick={onDismiss}
+              style={{
+                height: "46px",
+                borderRadius: "999px",
+                border: "1.5px solid #E2E8F0",
+                color: "#0F1F3D",
+                fontWeight: 600,
+                padding: "0 24px",
+                background: "#FFFFFF",
+                cursor: "pointer",
+              }}
+            >
+              Just visited
+            </button>
+            {onDismiss && (
+              <button
+                type="button"
+                onClick={onDismiss}
+                style={{
+                  background: "transparent",
+                  border: 0,
+                  color: "#64748B",
+                  fontSize: "12.5px",
+                  cursor: "pointer",
+                  padding: "8px 12px",
+                  textDecoration: "underline",
+                  width: "100%",
+                  textAlign: "center",
+                  marginTop: "4px",
+                }}
+              >
+                Ask me later
+              </button>
+            )}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -2458,6 +5007,8 @@ function StudentDashboard({
   onViewListing,
   opportunityActivityRevision,
   onUpdateOpportunityActivity,
+  initialTrackingOrder,
+  onClearInitialTrackingOrder,
 }: {
   student: User | null;
   section: StudentDashboardSection;
@@ -2468,6 +5019,8 @@ function StudentDashboard({
   onViewListing: (listing: Listing) => void;
   opportunityActivityRevision: number;
   onUpdateOpportunityActivity: (activity: OpportunityActivity, status: OpportunityActivityStatus) => void;
+  initialTrackingOrder?: AdminOrder | null;
+  onClearInitialTrackingOrder?: () => void;
 }) {
   const [message, setMessage] = useState("");
   const [opportunityActivities, setOpportunityActivities] = useState<OpportunityActivity[]>([]);
@@ -2486,33 +5039,118 @@ function StudentDashboard({
   const [academicYear, setAcademicYear] = useState("");
   const [location, setLocation] = useState("");
   const [interests, setInterests] = useState<string[]>([]);
-  const savedListings = listings.filter((listing) => savedIds.includes(listing.id));
-  const savedResources = resources.filter((resource) => savedIds.includes(resourceId(resource.title)));
-  const savedProjects = savedListings.filter((listing) => listing.kind === "Projects");
+  const [activityFilter, setActivityFilter] = useState<"all" | TrackableOpportunityKind>("all");
+  const [studentOrders, setStudentOrders] = useState<AdminOrder[]>(() => initialTrackingOrder ? [initialTrackingOrder] : []);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState("");
+  const [selectedTrackingOrder, setSelectedTrackingOrder] = useState<AdminOrder | null>(() => initialTrackingOrder || null);
+
+  useEffect(() => {
+    if (initialTrackingOrder) {
+      setSelectedTrackingOrder(initialTrackingOrder);
+    }
+  }, [initialTrackingOrder]);
+
+  useEffect(() => {
+    if (!student && !initialTrackingOrder) return;
+    setOrdersLoading(true);
+    setOrdersError("");
+    const emailToQuery = student?.email || initialTrackingOrder?.customer_email || localStorage.getItem("techcircuit-customer-email") || "";
+    const userIdToQuery = student?.id || "";
+    fetch(`/api/orders?userId=${encodeURIComponent(userIdToQuery)}&email=${encodeURIComponent(emailToQuery)}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Could not load your orders.");
+        const data = await res.json();
+        const orders: AdminOrder[] = data.orders || [];
+        if (initialTrackingOrder && !orders.some((o) => o.id === initialTrackingOrder.id)) {
+          orders.unshift(initialTrackingOrder);
+        }
+        setStudentOrders(orders);
+      })
+      .catch((err) => {
+        if (initialTrackingOrder) {
+          setStudentOrders([initialTrackingOrder]);
+        } else {
+          setOrdersError(err instanceof Error ? err.message : "Could not load orders.");
+        }
+      })
+      .finally(() => setOrdersLoading(false));
+  }, [student, section, initialTrackingOrder]);
+
   const appliedOpportunityCount = opportunityActivities.filter((activity) => activity.status === "applied" && activity.opportunity_kind === "Internships").length;
   const appliedEnrollmentCount = opportunityActivities.filter((activity) => activity.status === "applied" && activity.opportunity_kind === "Training").length;
   const trackedHackathonCount = opportunityActivities.filter((activity) => activity.opportunity_kind === "Hackathons").length;
-  const recommendedListings = listings
-    .filter((listing) => ["Internships", "Training", "Hackathons", "Projects"].includes(listing.kind))
-    .map((listing) => {
-      const searchable = `${listing.title} ${listing.summary} ${listing.tags.join(" ")} ${listing.projectCategory ?? ""}`.toLowerCase();
-      const matchCount = interests.filter((interest) => searchable.includes(interest.toLowerCase())).length;
-      return { listing, matchCount };
-    })
-    .sort((left, right) => right.matchCount - left.matchCount)
-    .slice(0, 4)
-    .map(({ listing }) => listing);
+  const recommendedListings = useMemo(() => {
+    const targetCategories: Array<"Training" | "Internships" | "Hackathons" | "Projects"> = [
+      "Training",
+      "Internships",
+      "Hackathons",
+      "Projects",
+    ];
+    const selected: Listing[] = [];
+    const usedIds = new Set<string>();
+
+    // 1. Pick the best-matching opportunity for each category (Training, Internships, Hackathons, Projects)
+    targetCategories.forEach((kind) => {
+      const candidates = listings
+        .filter((item) => item.kind === kind && !usedIds.has(item.id))
+        .map((listing) => {
+          const searchable = `${listing.title} ${listing.summary} ${listing.tags.join(" ")} ${listing.projectCategory ?? ""}`.toLowerCase();
+          const matchCount = interests.filter((interest) => searchable.includes(interest.toLowerCase())).length;
+          return { listing, matchCount };
+        })
+        .sort((a, b) => b.matchCount - a.matchCount);
+
+      if (candidates.length > 0) {
+        selected.push(candidates[0].listing);
+        usedIds.add(candidates[0].listing.id);
+      }
+    });
+
+    // 2. If any category was missing, fill up to 4 items from remaining highest-scored listings
+    if (selected.length < 4) {
+      const remainingCandidates = listings
+        .filter((item) => (targetCategories as string[]).includes(item.kind) && !usedIds.has(item.id))
+        .map((listing) => {
+          const searchable = `${listing.title} ${listing.summary} ${listing.tags.join(" ")} ${listing.projectCategory ?? ""}`.toLowerCase();
+          const matchCount = interests.filter((interest) => searchable.includes(interest.toLowerCase())).length;
+          return { listing, matchCount };
+        })
+        .sort((a, b) => b.matchCount - a.matchCount);
+
+      for (const item of remainingCandidates) {
+        if (selected.length >= 4) break;
+        selected.push(item.listing);
+        usedIds.add(item.listing.id);
+      }
+    }
+
+    return selected.slice(0, 4);
+  }, [listings, interests]);
   const displayName = profileName || student?.email?.split("@")[0] || "Student";
+  const filteredActivities = activityFilter === "all"
+    ? opportunityActivities
+    : opportunityActivities.filter((item) => item.opportunity_kind === activityFilter);
+
+  function handleUpdateOpportunityActivity(activity: OpportunityActivity, nextStatus: OpportunityActivityStatus) {
+    setOpportunityActivities((current) =>
+      current.map((item) =>
+        item.opportunity_id === activity.opportunity_id
+          ? { ...item, status: nextStatus, updated_at: new Date().toISOString() }
+          : item
+      )
+    );
+    onUpdateOpportunityActivity(activity, nextStatus);
+  }
   const quickAccess = [
     { label: "Internships", description: "Find your next opportunity", page: "Internships" as Page, icon: BriefcaseBusiness, tone: "blue" },
     { label: "Training", description: "Build practical skills", page: "Training" as Page, icon: GraduationCap, tone: "green" },
     { label: "Hackathons", description: "Learn by making together", page: "Hackathons" as Page, icon: Code2, tone: "purple" },
-    { label: "Resources", description: "Explore trusted study guides", page: "Learn" as Page, icon: BookOpen, tone: "cyan" },
     { label: "Projects", description: "Discover your next build", page: "Projects" as Page, icon: Cpu, tone: "orange" },
-    { label: "Component comparison", description: "Compare parts for your build", page: "Products" as Page, icon: Scale, tone: "pink" },
   ];
   const sectionTitle: Record<StudentDashboardSection, string> = {
     overview: "Student dashboard",
+    orders: "My Orders & Tracking",
     applications: "My Applications & Enrollments",
     notifications: "Notifications",
     profile: "My Profile",
@@ -2597,15 +5235,15 @@ function StudentDashboard({
           setProfileLoadError(`Could not load your profile: ${error.message}`);
           return;
         }
-        const name = data?.display_name || currentStudent.user_metadata.name || "";
+        const name = data?.display_name || currentStudent.user_metadata?.name || "";
         const selectedInterests = data?.interests ?? [];
         setProfileName(name);
         setInstitution(data?.institution ?? "");
-        setCourse(data?.course ?? "");
+        setCourse(sanitizeCourse(data?.course));
         setAcademicYear(data?.academic_year ?? "");
         setLocation(data?.city ?? "");
         setInterests(selectedInterests);
-        const complete = Boolean(name.trim() && data?.institution?.trim() && data?.course?.trim() && data?.academic_year?.trim() && selectedInterests.length);
+        const complete = Boolean(name.trim() && data?.institution?.trim() && sanitizeCourse(data?.course).trim() && data?.academic_year?.trim() && selectedInterests.length);
         setProfileSetupRequired(!complete);
         if (!complete) setSection("profile");
       } catch {
@@ -2624,7 +5262,8 @@ function StudentDashboard({
   async function saveProfile(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!student) return;
-    if (!profileName.trim() || !institution.trim() || !course.trim() || !academicYear) {
+    const sanitizedCourse = sanitizeCourse(course);
+    if (!profileName.trim() || !institution.trim() || !sanitizedCourse.trim() || !academicYear) {
       setProfileError("Enter your name, institution, course and academic year to continue.");
       return;
     }
@@ -2648,7 +5287,7 @@ function StudentDashboard({
         .update({
           display_name: profileName.trim(),
           institution: institution.trim(),
-          course: course.trim(),
+          course: sanitizedCourse.trim(),
           academic_year: academicYear,
           city: location.trim(),
           interests,
@@ -2661,14 +5300,32 @@ function StudentDashboard({
         return;
       }
       if (!data) {
-        setProfileError("Your student profile was not found. Please sign out and sign in again.");
-        return;
+        const { data: upsertData, error: upsertError } = await client
+          .from("profiles")
+          .upsert({
+            id: currentStudent.id,
+            display_name: profileName.trim(),
+            institution: institution.trim(),
+            course: sanitizedCourse.trim(),
+            academic_year: academicYear,
+            city: location.trim(),
+            interests,
+            role: "student",
+          })
+          .select("id")
+          .maybeSingle();
+
+        if (upsertError || !upsertData) {
+          setProfileError(upsertError ? `Could not save your profile: ${upsertError.message}` : "Your student profile was not found. Please sign out and sign in again.");
+          return;
+        }
       }
+      setCourse(sanitizedCourse);
       setMessage("Your student profile was saved.");
       setProfileSetupRequired(false);
       if (profileSetupRequired) setSection("overview");
-    } catch {
-      setProfileError("Could not save your profile. Please try again.");
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : "Could not save your profile. Please try again.");
     } finally {
       setProfileSaving(false);
     }
@@ -2723,29 +5380,47 @@ function StudentDashboard({
       aria-modal={profileSetupRequired ? true : undefined}
       aria-labelledby={profileSetupRequired ? "student-setup-title" : undefined}
     >
-      <div className="dashboard-section-head"><div><div className="eyebrow"><span className="eyebrow-line" /> {profileSetupRequired ? "STUDENT DETAILS" : "YOUR DETAILS"}</div><h2 id={profileSetupRequired ? "student-setup-title" : undefined}>{profileSetupRequired ? "Set up your student profile" : "Student profile"}</h2>{profileSetupRequired && <p className="profile-setup-intro">Tell us about your studies and choose the engineering areas you want to explore.</p>}</div><span className="profile-private-note"><ShieldCheck size={14} /> Private to your account</span></div>
+      <div className="dashboard-section-head">
+        <div>
+          <div className="eyebrow"><span className="eyebrow-line" /> {profileSetupRequired ? "STUDENT DETAILS" : "YOUR DETAILS"}</div>
+          <h2 id={profileSetupRequired ? "student-setup-title" : undefined}>{profileSetupRequired ? "Set up your student profile" : "Student profile"}</h2>
+          {profileSetupRequired && <p className="profile-setup-intro">Tell us about your studies and choose the engineering areas you want to explore.</p>}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <span className="profile-private-note"><ShieldCheck size={14} /> Private to your account</span>
+          {profileSetupRequired && (
+            <button className="button button-outline button-small" type="button" onClick={signOut} title="Sign out of student account" style={{ padding: "4px 10px", fontSize: "12px", minHeight: "30px" }}>
+              <LogOut size={13} /> Sign out
+            </button>
+          )}
+        </div>
+      </div>
       <form className="student-profile-form" onSubmit={saveProfile}>
-        <label>Full name<input required value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder="Your full name" /></label>
-        <label>Email address<input value={student.email ?? ""} readOnly aria-readonly="true" /></label>
-        <label>College / institution<input required value={institution} onChange={(event) => setInstitution(event.target.value)} placeholder="Your college or institution" /></label>
-        <label>Course / branch<input required value={course} onChange={(event) => setCourse(event.target.value)} placeholder="e.g. Electronics and Communication Engineering" /></label>
-        <label>Academic year<select required value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}><option value="">Select your year</option>{ACADEMIC_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
-        <label>City <span>(optional)</span><input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Your city" /></label>
-        <fieldset className="student-interest-fieldset">
-          <legend>What areas interest you? <span>Select one or more</span></legend>
-          <div className="student-interest-options">
-            {STUDENT_INTERESTS.map((interest) => (
-              <label key={interest} className={interests.includes(interest) ? "student-interest-option selected" : "student-interest-option"}>
-                <input type="checkbox" checked={interests.includes(interest)} onChange={() => setInterests((current) => current.includes(interest) ? current.filter((item) => item !== interest) : [...current, interest])} />
-                <span>{interest}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        {(profileLoading || profileSaving) && <p className="profile-status" role="status">{profileLoading ? "Loading your profile…" : "Saving profile…"}</p>}
-        {profileError && <p className="admin-message profile-status" role="alert">{profileError}</p>}
-        {message && <p className="auth-success profile-status" role="status">{message}</p>}
-        <button className="button button-primary profile-save" type="submit" disabled={profileLoading || profileSaving}>{profileSaving ? "Saving your profile…" : profileSetupRequired ? "Save details and continue" : "Save profile"} <Check size={15} /></button>
+        <div className="student-profile-form-body">
+          <label>Full name<input required value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder="Your full name" /></label>
+          <label>Email address<input value={student.email ?? ""} readOnly aria-readonly="true" /></label>
+          <label>College / institution<input required value={institution} onChange={(event) => setInstitution(event.target.value)} placeholder="Your college or institution" /></label>
+          <label>Course / branch<input required value={course} onChange={(event) => setCourse(event.target.value)} placeholder="e.g. Electronics and Communication Engineering" /></label>
+          <label>Academic year<select required value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}><option value="">Select your year</option>{ACADEMIC_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
+          <label>City <span>(optional)</span><input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Your city" /></label>
+          <fieldset className="student-interest-fieldset">
+            <legend>What areas interest you? <span>Select one or more</span></legend>
+            <div className="student-interest-options">
+              {STUDENT_INTERESTS.map((interest) => (
+                <label key={interest} className={interests.includes(interest) ? "student-interest-option selected" : "student-interest-option"}>
+                  <input type="checkbox" checked={interests.includes(interest)} onChange={() => setInterests((current) => current.includes(interest) ? current.filter((item) => item !== interest) : [...current, interest])} />
+                  <span>{interest}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </div>
+        <div className="student-profile-actions">
+          {(profileLoading || profileSaving) && <p className="profile-status" role="status">{profileLoading ? "Loading your profile…" : "Saving profile…"}</p>}
+          {profileError && <p className="admin-message profile-status" role="alert">{profileError}</p>}
+          {message && <p className="auth-success profile-status" role="status">{message}</p>}
+          <button className="button button-primary profile-save" type="submit" disabled={profileLoading || profileSaving}>{profileSaving ? "Saving your profile…" : profileSetupRequired ? "Save details and continue" : "Save profile"} <Check size={15} /></button>
+        </div>
       </form>
     </section>
   );
@@ -2769,6 +5444,9 @@ function StudentDashboard({
           <button className="button button-outline button-small" onClick={signOut}><LogOut size={14} /> Sign out</button>
         </div>
       </section>
+
+
+
       <section className="dashboard-content">
         {section === "overview" && !profileSetupRequired && (
           <>
@@ -2788,35 +5466,81 @@ function StudentDashboard({
             <section className="dashboard-home-section">
               <div className="dashboard-section-head"><div><h2>My progress</h2><p>Your saved learning and profile activity.</p></div><button className="text-link" type="button" onClick={() => navigate("Saved")}>View bookmarks <ArrowRight size={15} /></button></div>
               <div className="dashboard-progress-grid">
-                <article className="progress-card tone-blue"><span className="dashboard-metric-icon"><BriefcaseBusiness size={17} /></span><span>APPLICATIONS</span><strong>{opportunityActivityLoading || opportunityActivityLoadError ? "—" : appliedOpportunityCount}</strong><small>{opportunityActivityLoadError ? "Could not load opportunity activity" : "Self-reported internship applications"}</small></article>
-                <article className="progress-card tone-green"><span className="dashboard-metric-icon"><GraduationCap size={17} /></span><span>ENROLLMENTS</span><strong>{opportunityActivityLoading || opportunityActivityLoadError ? "—" : appliedEnrollmentCount}</strong><small>{opportunityActivityLoadError ? "Could not load opportunity activity" : "Self-reported training enrollments"}</small></article>
-                <article className="progress-card tone-purple"><span className="dashboard-metric-icon"><Code2 size={17} /></span><span>HACKATHONS</span><strong>{opportunityActivityLoading || opportunityActivityLoadError ? "—" : trackedHackathonCount}</strong><small>{opportunityActivityLoadError ? "Could not load opportunity activity" : "Visits and registrations tracked"}</small></article>
-                <article className="progress-card tone-cyan"><span className="dashboard-metric-icon"><BookOpen size={17} /></span><span>RESOURCES SAVED</span><strong>{savedResources.length}</strong><small>In your bookmarks</small></article>
-                <article className="progress-card tone-orange"><span className="dashboard-metric-icon"><Cpu size={17} /></span><span>PROJECTS SAVED</span><strong>{savedProjects.length}</strong><small>Ideas in your collection</small></article>
-                <article className="progress-card tone-pink"><span className="dashboard-metric-icon"><Sparkles size={17} /></span><span>FOCUS AREAS</span><strong>{interests.length}</strong><small>Selected in your profile</small></article>
+                <button className="progress-card tone-blue" type="button" onClick={() => setSection("applications")}>
+                  <span className="dashboard-metric-icon"><BriefcaseBusiness size={17} /></span>
+                  <span>APPLICATIONS</span>
+                  <strong>{opportunityActivityLoading || opportunityActivityLoadError ? "—" : appliedOpportunityCount}</strong>
+                  <small>{opportunityActivityLoadError ? "Could not load opportunity activity" : "Self-reported internship applications"}</small>
+                </button>
+                <button className="progress-card tone-green" type="button" onClick={() => setSection("applications")}>
+                  <span className="dashboard-metric-icon"><GraduationCap size={17} /></span>
+                  <span>ENROLLMENTS</span>
+                  <strong>{opportunityActivityLoading || opportunityActivityLoadError ? "—" : appliedEnrollmentCount}</strong>
+                  <small>{opportunityActivityLoadError ? "Could not load opportunity activity" : "Self-reported training enrollments"}</small>
+                </button>
+                <button className="progress-card tone-purple" type="button" onClick={() => setSection("applications")}>
+                  <span className="dashboard-metric-icon"><Code2 size={17} /></span>
+                  <span>HACKATHONS</span>
+                  <strong>{opportunityActivityLoading || opportunityActivityLoadError ? "—" : trackedHackathonCount}</strong>
+                  <small>{opportunityActivityLoadError ? "Could not load opportunity activity" : "Visits and registrations tracked"}</small>
+                </button>
+                <button className="progress-card tone-cyan" type="button" onClick={() => navigate("Saved")}>
+                  <span className="dashboard-metric-icon"><BookOpen size={17} /></span>
+                  <span>SAVED BOOKMARKS</span>
+                  <strong>{savedIds.length}</strong>
+                  <small>Projects &amp; resources in your collection</small>
+                </button>
               </div>
             </section>
 
             <section className="dashboard-home-section">
-              <div className="dashboard-section-head"><div><h2>Recommended for you</h2><p>Discover projects and opportunities related to your interests.</p></div><button className="text-link" type="button" onClick={() => navigate("Projects")}>Explore all <ArrowRight size={15} /></button></div>
+              <div className="dashboard-section-head">
+                <div>
+                  <h2>Recommended for you</h2>
+                  <p>Discover training, internships, hackathons, and projects curated for your learning journey.</p>
+                </div>
+                <button className="text-link" type="button" onClick={() => navigate("Projects")}>Explore all <ArrowRight size={15} /></button>
+              </div>
               {recommendedListings.length > 0 ? (
                 <div className="dashboard-recommend-grid">
-                  {recommendedListings.map((listing, index) => (
-                    <article className="dashboard-recommend-card" key={listing.id}>
-                      <div className={`dashboard-recommend-image tone-${["blue", "green", "purple", "orange"][index % 4]}`}>
-                        {listing.kind === "Projects" && listing.imageUrl ? <img src={listing.imageUrl} alt="" loading="lazy" /> : <GraduationCap size={24} />}
-                        <span>{listing.kind === "Projects" ? "Project" : listing.kind === "Hackathons" ? "Hackathon" : listing.kind === "Internships" ? "Internship" : "Training"}</span>
-                      </div>
-                      <div className="dashboard-recommend-content">
-                        <span>{listing.organization}</span>
-                        <h3>{listing.title}</h3>
-                        <p>{listing.summary}</p>
-                        <button className="dashboard-recommend-link" type="button" onClick={() => onViewListing(listing)}>
-                          View details <ArrowRight size={14} />
-                        </button>
-                      </div>
-                    </article>
-                  ))}
+                  {recommendedListings.map((listing) => {
+                    const kindBadge = listing.kind === "Projects" ? "Project" : listing.kind === "Hackathons" ? "Hackathon" : listing.kind === "Internships" ? "Internship" : "Training";
+                    const toneClass = listing.kind === "Internships" ? "tone-blue" : listing.kind === "Training" ? "tone-green" : listing.kind === "Hackathons" ? "tone-purple" : "tone-orange";
+                    return (
+                      <article className="dashboard-recommend-card" key={listing.id}>
+                        <div className={`dashboard-recommend-image ${toneClass}`}>
+                          {listing.kind === "Projects" && listing.imageUrl ? (
+                            <img src={listing.imageUrl} alt={listing.title} loading="lazy" />
+                          ) : listing.kind === "Internships" ? (
+                            <BriefcaseBusiness size={28} />
+                          ) : listing.kind === "Training" ? (
+                            <GraduationCap size={28} />
+                          ) : listing.kind === "Hackathons" ? (
+                            <Code2 size={28} />
+                          ) : (
+                            <Cpu size={28} />
+                          )}
+                          <span className="dashboard-recommend-kind-tag">{kindBadge}</span>
+                        </div>
+                        <div className="dashboard-recommend-content">
+                          <div className="dashboard-recommend-meta">
+                            <span className="dashboard-recommend-org">{listing.organization}</span>
+                            {listing.city && <span className="dashboard-recommend-city">· {listing.city}</span>}
+                          </div>
+                          <h3>{listing.title}</h3>
+                          <p>{listing.summary}</p>
+                          <div className="dashboard-recommend-footer">
+                            <button className="dashboard-recommend-link" type="button" onClick={() => onViewListing(listing)}>
+                              View details <ArrowRight size={14} />
+                            </button>
+                            {listing.tags && listing.tags.length > 0 && (
+                              <span className="dashboard-recommend-tag">{listing.tags[0]}</span>
+                            )}
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="empty-state dashboard-empty"><div className="empty-icon"><Compass size={22} /></div><h3>More recommendations are on the way.</h3><p>Browse projects and learning opportunities to get started.</p><button className="button button-primary" type="button" onClick={() => navigate("Projects")}>Explore projects <ArrowRight size={15} /></button></div>
@@ -2824,9 +5548,337 @@ function StudentDashboard({
             </section>
           </>
         )}
+        {/* SECTION: MY ORDERS & TRACKING */}
+        {section === "orders" && !profileSetupRequired && (
+          <section className="opportunity-activity-section">
+            <div className="dashboard-section-head">
+              <div>
+                <span className="eyebrow"><span className="eyebrow-line" /> HARDWARE KIT ORDERS</span>
+                <h2>My Orders &amp; Build Tracking</h2>
+                <p>
+                  Engineering projects are handcrafted and built to order (~7 days delivery). Follow your project through assembly, firmware flashing, testing, and courier delivery.
+                </p>
+              </div>
+            </div>
+
+            {selectedTrackingOrder ? (
+              <div className="order-tracking-detail-card" style={{ background: "#FFFFFF", borderRadius: "16px", padding: "24px", border: "1px solid #E2E8F0", boxShadow: "0 4px 16px rgba(15,31,61,0.04)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "10px" }}>
+                  <button
+                    type="button"
+                    className="button button-outline button-small"
+                    onClick={() => {
+                      setSelectedTrackingOrder(null);
+                      if (onClearInitialTrackingOrder) onClearInitialTrackingOrder();
+                    }}
+                  >
+                    <ArrowLeft size={14} /> Back to My Orders
+                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span className={`tracking-badge stage-${selectedTrackingOrder.tracking_status.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}>
+                      {selectedTrackingOrder.tracking_status}
+                    </span>
+                    <span style={{ fontSize: "13px", fontWeight: 700, color: "#16A34A", background: "#DCFCE7", padding: "4px 10px", borderRadius: "999px" }}>
+                      PAID via {selectedTrackingOrder.payment_method === "upi" ? "UPI" : "Card"}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "12px", borderBottom: "1px solid #F1F5F9", paddingBottom: "16px", marginBottom: "24px" }}>
+                  <div>
+                    <h3 style={{ margin: "0 0 4px", fontSize: "20px", color: "#0F1F3D", fontWeight: 800 }}>
+                      Order #{selectedTrackingOrder.order_number || selectedTrackingOrder.id}
+                    </h3>
+                    <small style={{ color: "#64748B" }}>
+                      Placed on {new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" }).format(new Date(selectedTrackingOrder.created_at))}
+                    </small>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ display: "block", fontSize: "12px", color: "#64748B" }}>Expected Delivery</span>
+                    <strong style={{ fontSize: "15px", color: "#F97316" }}>
+                      {selectedTrackingOrder.expected_delivery_date
+                        ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(selectedTrackingOrder.expected_delivery_date))
+                        : "~7 days from order"}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Visual Step Timeline */}
+                <div style={{ margin: "28px 0" }}>
+                  <h4 style={{ fontSize: "14.5px", color: "#0F1F3D", fontWeight: 700, marginBottom: "16px" }}>
+                    Production &amp; Tracking Stages
+                  </h4>
+
+                  <div className="tracking-timeline-stepper">
+                    {(
+                      [
+                        "Order Placed",
+                        "Confirmed",
+                        "Building (Processing)",
+                        "Testing / Quality Check",
+                        "Packed",
+                        "Shipped",
+                        "Delivered",
+                      ] as OrderTrackingStage[]
+                    ).map((stageName, idx, arr) => {
+                      const allStages: OrderTrackingStage[] = [
+                        "Order Placed",
+                        "Confirmed",
+                        "Building (Processing)",
+                        "Testing / Quality Check",
+                        "Packed",
+                        "Shipped",
+                        "Delivered",
+                      ];
+                      const currentIdx = allStages.indexOf(selectedTrackingOrder.tracking_status);
+                      const isCompleted = idx < currentIdx;
+                      const isCurrent = idx === currentIdx;
+
+                      return (
+                        <div
+                          key={stageName}
+                          className={`tracking-timeline-step ${isCompleted ? "is-completed" : ""} ${isCurrent ? "is-current" : ""}`}
+                        >
+                          <div className="timeline-dot-wrapper">
+                            <div className="timeline-dot">
+                              {isCompleted ? <Check size={14} /> : <span>{idx + 1}</span>}
+                            </div>
+                            {idx < arr.length - 1 && <div className="timeline-connector" />}
+                          </div>
+                          <div className="timeline-step-content">
+                            <strong className="timeline-step-title">{stageName}</strong>
+                            {isCurrent && (
+                              <span className="timeline-step-status-tag">Current Phase</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Engineer's public note if available */}
+                {selectedTrackingOrder.public_notes && (
+                  <div
+                    style={{
+                      background: "#FFF7ED",
+                      border: "1px solid #FED7AA",
+                      borderRadius: "12px",
+                      padding: "16px",
+                      marginBottom: "24px",
+                      display: "flex",
+                      gap: "12px",
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <div style={{ color: "#F97316", marginTop: "2px" }}><Sparkles size={18} /></div>
+                    <div>
+                      <strong style={{ fontSize: "13.5px", color: "#9A3412", display: "block", marginBottom: "2px" }}>
+                        Workshop Engineer's Update
+                      </strong>
+                      <p style={{ margin: 0, fontSize: "13px", color: "#431407" }}>
+                        {selectedTrackingOrder.public_notes}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Courier Shipping Details (if dispatched) */}
+                {(selectedTrackingOrder.courier_name || selectedTrackingOrder.courier_tracking_number) && (
+                  <div
+                    style={{
+                      background: "#F0FDF4",
+                      border: "1px solid #BBF7D0",
+                      borderRadius: "12px",
+                      padding: "16px",
+                      marginBottom: "24px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: "12px",
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#166534", fontWeight: 700, fontSize: "14px", marginBottom: "4px" }}>
+                        <Truck size={18} /> Dispatched via {selectedTrackingOrder.courier_name || "Courier"}
+                      </div>
+                      <p style={{ margin: 0, fontSize: "13px", color: "#14532D" }}>
+                        Waybill / Tracking No: <strong>{selectedTrackingOrder.courier_tracking_number || "Awaiting scan"}</strong>
+                      </p>
+                    </div>
+                    {selectedTrackingOrder.courier_tracking_url && (
+                      <a
+                        href={selectedTrackingOrder.courier_tracking_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="button button-primary button-small"
+                        style={{ textDecoration: "none" }}
+                      >
+                        Track with Carrier <ArrowUpRight size={14} />
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {/* Two-column layout: Items & Delivery Address */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
+                  <div style={{ background: "#F8FAFC", borderRadius: "12px", padding: "16px", border: "1px solid #E2E8F0" }}>
+                    <h4 style={{ margin: "0 0 12px", fontSize: "14px", color: "#0F1F3D", fontWeight: 700 }}>
+                      Items in this Order
+                    </h4>
+                    {selectedTrackingOrder.items.map((item, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: i < selectedTrackingOrder.items.length - 1 ? "1px solid #E2E8F0" : "none", fontSize: "13px" }}>
+                        <div>
+                          <strong style={{ color: "#0F1F3D", display: "block" }}>{item.title}</strong>
+                          <span style={{ color: "#64748B" }}>Qty: {item.qty}</span>
+                        </div>
+                        <span style={{ fontWeight: 700, color: "#0F1F3D" }}>{formatRupee(item.price * item.qty)}</span>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", justifyContent: "space-between", borderTop: "2px solid #E2E8F0", paddingTop: "10px", marginTop: "10px", fontSize: "14px" }}>
+                      <strong>Total Paid</strong>
+                      <strong style={{ color: "#F97316" }}>{formatRupee(selectedTrackingOrder.total_amount)}</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#F8FAFC", borderRadius: "12px", padding: "16px", border: "1px solid #E2E8F0" }}>
+                    <h4 style={{ margin: "0 0 12px", fontSize: "14px", color: "#0F1F3D", fontWeight: 700 }}>
+                      Delivery Address
+                    </h4>
+                    <p style={{ margin: "0 0 4px", fontSize: "13.5px", fontWeight: 600, color: "#0F1F3D" }}>
+                      {selectedTrackingOrder.customer_name} ({selectedTrackingOrder.customer_phone})
+                    </p>
+                    <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#475569" }}>
+                      {selectedTrackingOrder.shipping_address?.addressLine1}
+                      {selectedTrackingOrder.shipping_address?.addressLine2 ? `, ${selectedTrackingOrder.shipping_address.addressLine2}` : ""}
+                    </p>
+                    <p style={{ margin: 0, fontSize: "13px", color: "#475569" }}>
+                      {selectedTrackingOrder.shipping_address?.city}, {selectedTrackingOrder.shipping_address?.state} - <strong>{selectedTrackingOrder.shipping_address?.pincode}</strong>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : ordersLoading ? (
+              <p className="profile-status" role="status">Loading your build-to-order projects…</p>
+            ) : ordersError ? (
+              <p className="admin-message profile-status" role="alert">{ordersError}</p>
+            ) : studentOrders.length === 0 ? (
+              <div className="empty-state dashboard-menu-empty">
+                <div className="empty-icon"><PackageCheck size={24} /></div>
+                <h3>No project orders yet.</h3>
+                <p>
+                  Ready-made engineering designs are built to order and delivered directly to your doorstep in about 7 days after payment.
+                </p>
+                <div className="dashboard-menu-actions">
+                  <button className="button button-primary" type="button" onClick={() => navigate("Projects")}>
+                    Browse Ready-Made Projects <ArrowRight size={15} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="student-orders-list" style={{ display: "grid", gap: "16px" }}>
+                {studentOrders.map((order) => (
+                  <article
+                    key={order.id}
+                    className="student-order-card"
+                    style={{
+                      background: "#FFFFFF",
+                      borderRadius: "14px",
+                      padding: "20px",
+                      border: "1px solid #E2E8F0",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: "16px",
+                      boxShadow: "0 2px 8px rgba(15,31,61,0.03)",
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: "240px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "15px", fontWeight: 800, color: "#0F1F3D" }}>
+                          #{order.order_number || order.id}
+                        </span>
+                        <span className={`tracking-badge stage-${order.tracking_status.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}>
+                          {order.tracking_status}
+                        </span>
+                      </div>
+                      <p style={{ margin: "0 0 6px", fontSize: "13px", color: "#334155" }}>
+                        {order.items.map((it) => it.title).join(", ")}
+                      </p>
+                      <div style={{ display: "flex", gap: "16px", fontSize: "12px", color: "#64748B", flexWrap: "wrap" }}>
+                        <span>Ordered: {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(order.created_at))}</span>
+                        <span>•</span>
+                        <span>Expected Delivery: <strong style={{ color: "#F97316" }}>{order.expected_delivery_date ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(order.expected_delivery_date)) : "~7 days"}</strong></span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                      <div style={{ textAlign: "right" }}>
+                        <strong style={{ fontSize: "16px", color: "#0F1F3D", display: "block" }}>
+                          {formatRupee(order.total_amount)}
+                        </strong>
+                        <small style={{ color: "#16A34A", fontWeight: 600 }}>PAID</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="button button-primary button-small"
+                        onClick={() => setSelectedTrackingOrder(order)}
+                      >
+                        Track Order <ArrowRight size={14} />
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         {section === "applications" && !profileSetupRequired && (
           <section className="opportunity-activity-section">
-            <div className="dashboard-section-head"><div><span className="eyebrow"><span className="eyebrow-line" /> YOUR LEARNING JOURNEY</span><h2>Applications &amp; enrollments</h2><p>Track the opportunities you visited. Application status is based on your answer, not provider confirmation.</p></div></div>
+            <div className="dashboard-section-head">
+              <div>
+                <span className="eyebrow"><span className="eyebrow-line" /> YOUR LEARNING JOURNEY</span>
+                <h2>Applications &amp; enrollments</h2>
+                <p>Track the opportunities you visited. Application status is based on your answer, not provider confirmation.</p>
+              </div>
+            </div>
+
+            {opportunityActivities.length > 0 && (
+              <div className="opportunity-filter-tabs" role="tablist" aria-label="Filter opportunities by kind">
+                <button
+                  type="button"
+                  className={`filter-chip${activityFilter === "all" ? " active" : ""}`}
+                  onClick={() => setActivityFilter("all")}
+                >
+                  All ({opportunityActivities.length})
+                </button>
+                <button
+                  type="button"
+                  className={`filter-chip${activityFilter === "Internships" ? " active" : ""}`}
+                  onClick={() => setActivityFilter("Internships")}
+                >
+                  Internships ({opportunityActivities.filter((a) => a.opportunity_kind === "Internships").length})
+                </button>
+                <button
+                  type="button"
+                  className={`filter-chip${activityFilter === "Training" ? " active" : ""}`}
+                  onClick={() => setActivityFilter("Training")}
+                >
+                  Training ({opportunityActivities.filter((a) => a.opportunity_kind === "Training").length})
+                </button>
+                <button
+                  type="button"
+                  className={`filter-chip${activityFilter === "Hackathons" ? " active" : ""}`}
+                  onClick={() => setActivityFilter("Hackathons")}
+                >
+                  Hackathons ({opportunityActivities.filter((a) => a.opportunity_kind === "Hackathons").length})
+                </button>
+              </div>
+            )}
+
             {opportunityActivityLoading ? (
               <p className="profile-status" role="status">Loading your opportunity activity…</p>
             ) : opportunityActivityLoadError ? (
@@ -2842,9 +5894,16 @@ function StudentDashboard({
                   <button className="button button-outline" type="button" onClick={() => navigate("Hackathons")}>Browse hackathons <ArrowRight size={15} /></button>
                 </div>
               </div>
+            ) : filteredActivities.length === 0 ? (
+              <div className="empty-state dashboard-menu-empty">
+                <div className="empty-icon"><Compass size={23} /></div>
+                <h3>No {activityFilter} activity found.</h3>
+                <p>You haven't tracked any opportunities under this category yet.</p>
+                <button className="button button-outline" type="button" onClick={() => setActivityFilter("all")}>Show all activity <ArrowRight size={14} /></button>
+              </div>
             ) : (
               <div className="opportunity-activity-list">
-                {opportunityActivities.map((activity) => (
+                {filteredActivities.map((activity) => (
                   <article className="opportunity-activity-card" key={activity.opportunity_id}>
                     <div className="opportunity-activity-copy">
                       <span className="opportunity-activity-kind">{activity.opportunity_kind}</span>
@@ -2857,7 +5916,7 @@ function StudentDashboard({
                     </div>
                     <div className="opportunity-activity-actions">
                       <a className="button button-outline button-small" href={activity.opportunity_url} target="_blank" rel="noreferrer">Open listing <ArrowUpRight size={14} /></a>
-                      <button className="text-link" type="button" onClick={() => onUpdateOpportunityActivity(activity, activity.status === "applied" ? "visited" : "applied")}>
+                      <button className="text-link" type="button" onClick={() => handleUpdateOpportunityActivity(activity, activity.status === "applied" ? "visited" : "applied")}>
                         {activity.status === "applied" ? "Change to just visited" : "Mark as applied"}
                       </button>
                     </div>
@@ -2873,6 +5932,10 @@ function StudentDashboard({
             <span className="eyebrow"><span className="eyebrow-line" /> UPDATES</span>
             <h3>You’re all caught up.</h3>
             <p>There are no notifications yet. Application and enrollment updates are not currently delivered through the platform.</p>
+            <div className="dashboard-menu-actions">
+              <button className="button button-primary button-small" type="button" onClick={() => setSection("overview")}>Back to overview <ArrowRight size={14} /></button>
+              <button className="button button-outline button-small" type="button" onClick={() => navigate("Saved")}>View bookmarks <ArrowRight size={14} /></button>
+            </div>
           </div>
         )}
         {section === "settings" && !profileSetupRequired && (
@@ -2881,15 +5944,20 @@ function StudentDashboard({
               <span className="dashboard-metric-icon"><Settings size={18} /></span>
               <span className="eyebrow"><span className="eyebrow-line" /> ACCOUNT SETTINGS</span>
               <h2>Keep your student details up to date.</h2>
-              <p>Manage your profile information and account email from your student profile.</p>
-              <button className="text-link" type="button" onClick={() => setSection("profile")}>Open my profile <ArrowRight size={15} /></button>
+              <p>Manage your profile information, academic details, and account email from your student profile.</p>
+              <div style={{ display: "flex", gap: "10px", marginTop: "12px", flexWrap: "wrap" }}>
+                <button className="button button-primary button-small" type="button" onClick={() => setSection("profile")}>Open my profile <ArrowRight size={14} /></button>
+                <button className="button button-outline button-small" type="button" onClick={signOut}><LogOut size={14} /> Sign out</button>
+              </div>
             </article>
             <article className="dashboard-settings-card">
               <span className="dashboard-metric-icon"><LifeBuoy size={18} /></span>
               <span className="eyebrow"><span className="eyebrow-line" /> SUPPORT & RESOURCES</span>
               <h2>Find trusted learning resources.</h2>
               <p>Browse official documentation and learning references for electronics, embedded systems and IoT.</p>
-              <button className="text-link" type="button" onClick={() => navigate("Learn")}>Browse resources <ArrowRight size={15} /></button>
+              <div style={{ marginTop: "12px" }}>
+                <button className="button button-outline button-small" type="button" onClick={() => navigate("Learn")}>Browse resources <ArrowRight size={14} /></button>
+              </div>
             </article>
           </div>
         )}
@@ -2903,41 +5971,365 @@ function StudentDashboard({
   );
 }
 
-type AdminSection = "overview" | "publish" | "activity" | "profile";
+type AdminSection = "overview" | "orders" | "opportunities" | "components" | "activity" | "profile";
+
+interface AdminToast {
+  id: number;
+  message: string;
+  type: "success" | "error" | "info";
+}
 
 function AdminPage({ onExit }: { onExit: () => void }) {
   const supabase = useMemo(() => getSupabase(), []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminSection, setAdminSection] = useState<AdminSection>("overview");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [message, setMessage] = useState("");
-  const [kind, setKind] = useState<Listing["kind"]>("Manufacturing");
-  const [title, setTitle] = useState("");
-  const [organization, setOrganization] = useState("");
-  const [city, setCity] = useState("");
-  const [summary, setSummary] = useState("");
-  const [sourceUrl, setSourceUrl] = useState("");
-  const [opportunityActivities, setOpportunityActivities] = useState<AdminOpportunityActivity[]>([]);
-  const [activityLoading, setActivityLoading] = useState(true);
-  const [activityError, setActivityError] = useState("");
-  const [activityRefreshRevision, setActivityRefreshRevision] = useState(0);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [toast, setToast] = useState<AdminToast | null>(null);
+
+  // Opportunity state
   const [opportunityRows, setOpportunityRows] = useState<AdminOpportunityListing[]>([]);
   const [opportunityRowsLoading, setOpportunityRowsLoading] = useState(true);
   const [opportunityRowsError, setOpportunityRowsError] = useState("");
   const [opportunityRowsRefreshRevision, setOpportunityRowsRefreshRevision] = useState(0);
+  const [oppSearch, setOppSearch] = useState("");
+  const [oppKindFilter, setOppKindFilter] = useState<"all" | TrackableOpportunityKind>("all");
+  const [oppStatusFilter, setOppStatusFilter] = useState<"all" | "published" | "draft">("all");
+  const [oppFormOpen, setOppFormOpen] = useState(false);
+  const [editingOppId, setEditingOppId] = useState("");
+  const [oppKind, setOppKind] = useState<TrackableOpportunityKind>("Internships");
+  const [oppTitle, setOppTitle] = useState("");
+  const [oppOrg, setOppOrg] = useState("");
+  const [oppCity, setOppCity] = useState("");
+  const [oppSummary, setOppSummary] = useState("");
+  const [oppUrl, setOppUrl] = useState("");
+  const [oppSaving, setOppSaving] = useState(false);
+
+  // Component state
   const [productRows, setProductRows] = useState<Listing[]>([]);
+  const [productRowsLoading, setProductRowsLoading] = useState(true);
+  const [productRowsError, setProductRowsError] = useState("");
+  const [productRowsRefreshRevision, setProductRowsRefreshRevision] = useState(0);
+  const [compSearch, setCompSearch] = useState("");
+  const [compFormOpen, setCompFormOpen] = useState(false);
   const [editingProductId, setEditingProductId] = useState("");
-  const [mpn, setMpn] = useState("");
-  const [componentCategory, setComponentCategory] = useState("");
-  const [componentImageUrl, setComponentImageUrl] = useState("");
+  const [compTitle, setCompTitle] = useState("");
+  const [compOrg, setCompOrg] = useState("");
+  const [compMpn, setCompMpn] = useState("");
+  const [compCategory, setCompCategory] = useState("");
+  const [compSummary, setCompSummary] = useState("");
+  const [compImageUrl, setCompImageUrl] = useState("");
   const [offerDrafts, setOfferDrafts] = useState<[ComponentOfferDraft, ComponentOfferDraft]>([
     newComponentOfferDraft(),
     newComponentOfferDraft(),
   ]);
+  const [compSaving, setCompSaving] = useState(false);
 
+  // Student activity state
+  const [opportunityActivities, setOpportunityActivities] = useState<AdminOpportunityActivity[]>([]);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState("");
+  const [activitySearch, setActivitySearch] = useState("");
+  const [activityStatusFilter, setActivityStatusFilter] = useState<"all" | OpportunityActivityStatus>("all");
+  const [activityKindFilter, setActivityKindFilter] = useState<"all" | TrackableOpportunityKind>("all");
+
+  // Orders Management State
+  const [adminOrders, setAdminOrders] = useState<AdminOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersRevision, setOrdersRevision] = useState(0);
+  const [orderSearch, setOrderSearch] = useState("");
+  const [orderFilterTab, setOrderFilterTab] = useState<
+    "all" | "paid" | "new" | "building" | "shipped" | "delivered" | "cancelled" | "issues"
+  >("all");
+  const [orderDateRange, setOrderDateRange] = useState<"all" | "today" | "week" | "month">("all");
+  const [selectedAdminOrder, setSelectedAdminOrder] = useState<AdminOrder | null>(null);
+  const [stageUpdating, setStageUpdating] = useState(false);
+  const [newStage, setNewStage] = useState<OrderTrackingStage>("Confirmed");
+  const [stageNote, setStageNote] = useState("");
+  const [courierNameInput, setCourierNameInput] = useState("");
+  const [courierTrackingNumberInput, setCourierTrackingNumberInput] = useState("");
+  const [courierTrackingUrlInput, setCourierTrackingUrlInput] = useState("");
+  const [expectedDateInput, setExpectedDateInput] = useState("");
+  const [internalNotesInput, setInternalNotesInput] = useState("");
+  const [confirmDeliveredDialogOpen, setConfirmDeliveredDialogOpen] = useState(false);
+  const [confirmCancelledDialogOpen, setConfirmCancelledDialogOpen] = useState(false);
+
+  // Fetch admin orders from server (with auto-polling)
+  useEffect(() => {
+    if (!isAdmin) return;
+    function fetchOrders() {
+      fetch("/api/orders?role=admin", {
+        headers: {
+          "x-user-role": "admin",
+        },
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error("Could not fetch orders.");
+          const data = await res.json();
+          setAdminOrders(data.orders || []);
+        })
+        .catch((err) => {
+          console.warn("Could not load orders:", err);
+        })
+        .finally(() => setOrdersLoading(false));
+    }
+
+    setOrdersLoading(true);
+    fetchOrders();
+    const interval = setInterval(fetchOrders, 8000);
+    return () => clearInterval(interval);
+  }, [isAdmin, ordersRevision]);
+
+  // Open single order in detail view
+  function openOrderDetail(order: AdminOrder) {
+    setSelectedAdminOrder(order);
+    setNewStage(order.tracking_status);
+    setStageNote("");
+    setCourierNameInput(order.courier_name || "");
+    setCourierTrackingNumberInput(order.courier_tracking_number || "");
+    setCourierTrackingUrlInput(order.courier_tracking_url || "");
+    setExpectedDateInput(order.expected_delivery_date ? order.expected_delivery_date.split("T")[0] : "");
+    setInternalNotesInput(order.admin_notes || "");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Handle stage change submission
+  async function submitStageUpdate(targetStage?: OrderTrackingStage) {
+    if (!selectedAdminOrder) return;
+    const stageToApply = targetStage || newStage;
+
+    if (stageToApply === "Shipped" && (!courierNameInput.trim() || !courierTrackingNumberInput.trim())) {
+      showToast("Courier Name and Tracking Number are required when marking as Shipped.", "error");
+      return;
+    }
+
+    if (stageToApply === "Delivered" && !confirmDeliveredDialogOpen) {
+      setConfirmDeliveredDialogOpen(true);
+      return;
+    }
+
+    if (
+      (selectedAdminOrder.tracking_status === "Cancelled" || selectedAdminOrder.tracking_status === "Refunded") &&
+      !confirmCancelledDialogOpen
+    ) {
+      setConfirmCancelledDialogOpen(true);
+      return;
+    }
+
+    setStageUpdating(true);
+    try {
+      const res = await fetch(`/api/orders/${selectedAdminOrder.id}/stage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to_stage: stageToApply,
+          stage: stageToApply,
+          note: stageNote.trim() || undefined,
+          courier_name: courierNameInput.trim() || undefined,
+          courier_tracking_number: courierTrackingNumberInput.trim() || undefined,
+          tracking_number: courierTrackingNumberInput.trim() || undefined,
+          courier_tracking_url: courierTrackingUrlInput.trim() || undefined,
+          tracking_url: courierTrackingUrlInput.trim() || undefined,
+          expected_delivery_date: expectedDateInput || undefined,
+          admin_notes: internalNotesInput.trim() || undefined,
+          internal_notes: internalNotesInput.trim() || undefined,
+          changed_by: adminEmail || "Administrator",
+          admin_name: adminEmail || "Administrator",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update tracking stage.");
+
+      showToast(`Order #${selectedAdminOrder.order_number} moved to ${stageToApply}`, "success");
+      setConfirmDeliveredDialogOpen(false);
+      setConfirmCancelledDialogOpen(false);
+      setSelectedAdminOrder(data.order);
+      setOrdersRevision((r) => r + 1);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not update order stage.", "error");
+    } finally {
+      setStageUpdating(false);
+    }
+  }
+
+  // Move to next sequential stage
+  function moveToNextStage() {
+    if (!selectedAdminOrder) return;
+    const sequence: OrderTrackingStage[] = [
+      "Order Placed",
+      "Confirmed",
+      "Building (Processing)",
+      "Testing / Quality Check",
+      "Packed",
+      "Shipped",
+      "Delivered",
+    ];
+    const currentIndex = sequence.indexOf(selectedAdminOrder.tracking_status);
+    if (currentIndex >= 0 && currentIndex < sequence.length - 1) {
+      const next = sequence[currentIndex + 1];
+      setNewStage(next);
+      if (next === "Shipped") {
+        showToast("Please enter courier name and tracking number below.", "info");
+      } else if (next === "Delivered") {
+        setConfirmDeliveredDialogOpen(true);
+      } else {
+        submitStageUpdate(next);
+      }
+    }
+  }
+
+  // Copy address to clipboard
+  function copyAddressToClipboard(order: AdminOrder) {
+    const text = `${order.customer_name}\n${order.customer_phone}\n${order.shipping_address?.addressLine1 || ""}${order.shipping_address?.addressLine2 ? `, ${order.shipping_address.addressLine2}` : ""}\n${order.shipping_address?.city || ""}, ${order.shipping_address?.state || ""} - ${order.shipping_address?.pincode || ""}`;
+    navigator.clipboard.writeText(text);
+    showToast("Delivery address copied to clipboard!", "success");
+  }
+
+  // Check if order is overdue
+  function isOrderOverdue(order: AdminOrder): boolean {
+    if (
+      order.payment_status !== "PAID" ||
+      order.tracking_status === "Delivered" ||
+      order.tracking_status === "Cancelled" ||
+      order.tracking_status === "Refunded"
+    ) {
+      return false;
+    }
+    if (!order.expected_delivery_date) return false;
+    return new Date(order.expected_delivery_date).getTime() < Date.now();
+  }
+
+  // Summary counts
+  const newOrdersCount = adminOrders.filter(
+    (o) => o.payment_status === "PAID" && (o.tracking_status === "Order Placed" || o.tracking_status === "Confirmed")
+  ).length;
+  const inBuildOrdersCount = adminOrders.filter(
+    (o) =>
+      o.payment_status === "PAID" &&
+      (o.tracking_status === "Building (Processing)" ||
+        o.tracking_status === "Testing / Quality Check" ||
+        o.tracking_status === "Packed")
+  ).length;
+  const shippedOrdersCount = adminOrders.filter(
+    (o) => o.payment_status === "PAID" && o.tracking_status === "Shipped"
+  ).length;
+  const deliveredOrdersCount = adminOrders.filter(
+    (o) => o.payment_status === "PAID" && o.tracking_status === "Delivered"
+  ).length;
+
+  // Filtered orders list
+  const filteredOrders = useMemo(() => {
+    return adminOrders
+      .filter((order) => {
+        if (orderFilterTab === "paid" && order.payment_status !== "PAID") return false;
+        if (
+          orderFilterTab === "new" &&
+          (order.payment_status !== "PAID" ||
+            (order.tracking_status !== "Order Placed" && order.tracking_status !== "Confirmed"))
+        )
+          return false;
+        if (
+          orderFilterTab === "building" &&
+          (order.payment_status !== "PAID" ||
+            (order.tracking_status !== "Building (Processing)" &&
+              order.tracking_status !== "Testing / Quality Check" &&
+              order.tracking_status !== "Packed"))
+        )
+          return false;
+        if (orderFilterTab === "shipped" && (order.payment_status !== "PAID" || order.tracking_status !== "Shipped"))
+          return false;
+        if (orderFilterTab === "delivered" && (order.payment_status !== "PAID" || order.tracking_status !== "Delivered"))
+          return false;
+        if (orderFilterTab === "cancelled" && order.tracking_status !== "Cancelled" && order.tracking_status !== "Refunded")
+          return false;
+        if (orderFilterTab === "issues" && order.payment_status !== "PENDING" && order.payment_status !== "FAILED")
+          return false;
+
+        if (orderDateRange !== "all") {
+          const orderDate = new Date(order.created_at).getTime();
+          const now = Date.now();
+          if (orderDateRange === "today" && now - orderDate > 24 * 60 * 60 * 1000) return false;
+          if (orderDateRange === "week" && now - orderDate > 7 * 24 * 60 * 60 * 1000) return false;
+          if (orderDateRange === "month" && now - orderDate > 30 * 24 * 60 * 60 * 1000) return false;
+        }
+
+        if (orderSearch.trim()) {
+          const q = orderSearch.toLowerCase();
+          const matchId = (order.order_number || order.id).toLowerCase().includes(q);
+          const matchName = (order.customer_name || "").toLowerCase().includes(q);
+          const matchEmail = (order.customer_email || "").toLowerCase().includes(q);
+          const matchPhone = (order.customer_phone || "").toLowerCase().includes(q);
+          const matchProjects = order.items.some((it) => it.title.toLowerCase().includes(q));
+          if (!matchId && !matchName && !matchEmail && !matchPhone && !matchProjects) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [adminOrders, orderFilterTab, orderDateRange, orderSearch]);
+
+  // CSV Export
+  function exportOrdersCsv() {
+    if (filteredOrders.length === 0) {
+      showToast("No orders available to export.", "info");
+      return;
+    }
+    const headers = [
+      "Order ID",
+      "Order Date",
+      "Customer Name",
+      "Customer Email",
+      "Customer Phone",
+      "Projects",
+      "Total Amount",
+      "Payment Status",
+      "Tracking Stage",
+      "Expected Delivery",
+      "Courier",
+      "Tracking Number",
+      "Address",
+    ];
+    const rows = filteredOrders.map((o) => [
+      `"${o.order_number || o.id}"`,
+      `"${new Date(o.created_at).toLocaleDateString()}"`,
+      `"${(o.customer_name || "").replace(/"/g, '""')}"`,
+      `"${o.customer_email || ""}"`,
+      `"${o.customer_phone || ""}"`,
+      `"${(o.items.map((i) => i.title).join("; ") || "").replace(/"/g, '""')}"`,
+      o.total_amount,
+      o.payment_status,
+      o.tracking_status,
+      `"${o.expected_delivery_date || ""}"`,
+      `"${o.courier_name || ""}"`,
+      `"${o.courier_tracking_number || ""}"`,
+      `"${(o.shipping_address?.addressLine1 + ", " + o.shipping_address?.city + ", " + o.shipping_address?.state + " " + o.shipping_address?.pincode).replace(/"/g, '""')}"`,
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `techcircuit-orders-${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("Orders CSV exported successfully.", "success");
+  }
+
+  function showToast(message: string, type: "success" | "error" | "info" = "info") {
+    const id = Date.now();
+    setToast({ id, message, type });
+    setTimeout(() => {
+      setToast((current) => (current?.id === id ? null : current));
+    }, 4500);
+  }
+
+  // Restore session
   useEffect(() => {
     if (!supabase) return;
     const client = supabase;
@@ -2945,191 +6337,374 @@ function AdminPage({ onExit }: { onExit: () => void }) {
       try {
         const { data, error } = await client.auth.getSession();
         if (error) {
-          setMessage(`Could not restore session: ${error.message}`);
+          setAuthError(`Could not restore session: ${error.message}`);
           return;
         }
         if (data.session) {
-          const authorized = await checkAdmin(client, data.session.user.id, setIsAdmin, setMessage);
-          if (authorized) setAdminEmail(data.session.user.email ?? "");
+          const authorized = await checkAdmin(client, data.session.user.id, setIsAdmin, setAuthError);
+          if (authorized) {
+            setAdminEmail(data.session.user.email ?? "");
+          }
         }
       } catch {
-        setMessage("Could not restore the admin session.");
+        setAuthError("Could not restore the admin session.");
       }
     }
     void restoreAdminSession();
   }, [supabase]);
 
+  // Load Component Listings
   useEffect(() => {
     if (!supabase || !isAdmin) return;
-    void loadAdminComponentListings(supabase)
-      .then(setProductRows)
-      .catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Could not load component listings."));
-  }, [supabase, isAdmin]);
+    let active = true;
+    setProductRowsLoading(true);
+    setProductRowsError("");
+    loadAdminComponentListings(supabase)
+      .then((rows) => {
+        if (active) setProductRows(rows);
+      })
+      .catch((error: unknown) => {
+        if (active) setProductRowsError(error instanceof Error ? error.message : "Could not load component catalog.");
+      })
+      .finally(() => {
+        if (active) setProductRowsLoading(false);
+      });
+    return () => { active = false; };
+  }, [supabase, isAdmin, productRowsRefreshRevision]);
 
+  // Load Opportunity Activities
   useEffect(() => {
     if (!supabase || !isAdmin) return;
     let active = true;
     setActivityLoading(true);
     setActivityError("");
-    void loadAdminOpportunityActivities(supabase)
-      .then((activities) => { if (active) setOpportunityActivities(activities); })
-      .catch((error: unknown) => { if (active) setActivityError(error instanceof Error ? error.message : "Could not load student opportunity activity."); })
-      .finally(() => { if (active) setActivityLoading(false); });
+    loadAdminOpportunityActivities(supabase)
+      .then((activities) => {
+        if (active) setOpportunityActivities(activities);
+      })
+      .catch((error: unknown) => {
+        if (active) setActivityError(error instanceof Error ? error.message : "Could not load student opportunity activity.");
+      })
+      .finally(() => {
+        if (active) setActivityLoading(false);
+      });
     return () => { active = false; };
-  }, [supabase, isAdmin, activityRefreshRevision]);
+  }, [supabase, isAdmin]);
 
+  // Load Opportunity Listings
   useEffect(() => {
     if (!supabase || !isAdmin) return;
     let active = true;
     setOpportunityRowsLoading(true);
     setOpportunityRowsError("");
-    void loadAdminOpportunityListings(supabase)
-      .then((rows) => { if (active) setOpportunityRows(rows); })
-      .catch((error: unknown) => { if (active) setOpportunityRowsError(error instanceof Error ? error.message : "Could not load opportunity listings."); })
-      .finally(() => { if (active) setOpportunityRowsLoading(false); });
+    loadAdminOpportunityListings(supabase)
+      .then((rows) => {
+        if (active) setOpportunityRows(rows);
+      })
+      .catch((error: unknown) => {
+        if (active) setOpportunityRowsError(error instanceof Error ? error.message : "Could not load opportunity listings.");
+      })
+      .finally(() => {
+        if (active) setOpportunityRowsLoading(false);
+      });
     return () => { active = false; };
   }, [supabase, isAdmin, opportunityRowsRefreshRevision]);
 
-  async function toggleOpportunityPublication(listing: AdminOpportunityListing) {
-    if (!supabase || !isAdmin) return;
-    setMessage("");
-    const nextPublished = !listing.isPublished;
-    const { error } = await supabase
-      .from("listings")
-      .update({
-        is_published: nextPublished,
-        is_expired: false,
-        verification_status: nextPublished && listing.verificationStatus === "pending" ? "source-linked" : listing.verificationStatus,
-        verified: false,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", listing.id);
-    if (error) {
-      setMessage(`Could not ${nextPublished ? "publish" : "unpublish"} opportunity: ${error.message}`);
-      return;
+  // Sign in
+  async function signIn(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) return;
+    setAuthError("");
+    setAuthBusy(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        setAuthError(`Sign-in failed: ${error.message}`);
+        return;
+      }
+      const authorized = await checkAdmin(supabase, data.user.id, setIsAdmin, setAuthError);
+      if (authorized) {
+        setAdminEmail(data.user.email ?? "");
+        setAdminSection("overview");
+        showToast("Authenticated as Administrator.", "success");
+      } else {
+        await supabase.auth.signOut();
+        setAuthError("This account does not have database administrator privileges.");
+      }
+    } catch {
+      setAuthError("An unexpected error occurred during sign in.");
+    } finally {
+      setAuthBusy(false);
     }
-    setMessage(nextPublished ? "Opportunity published." : "Opportunity unpublished.");
-    setOpportunityRowsRefreshRevision((revision) => revision + 1);
-    window.dispatchEvent(new Event("techcircuit:listings-updated"));
   }
 
-  function editComponent(id: string) {
-    setEditingProductId(id);
-    if (!id) {
-      setTitle("");
-      setOrganization("");
-      setCity("");
-      setSummary("");
-      setSourceUrl("");
-      setMpn("");
-      setComponentCategory("");
-      setComponentImageUrl("");
-      setOfferDrafts([newComponentOfferDraft(), newComponentOfferDraft()]);
+  // Sign out
+  async function signOut() {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        showToast(`Sign-out failed: ${error.message}`, "error");
+      } else {
+        setIsAdmin(false);
+        setAdminEmail("");
+        showToast("You have been signed out.", "info");
+        onExit();
+      }
+    } catch {
+      showToast("Could not complete sign out.", "error");
+    }
+  }
+
+  // Toggle opportunity publication
+  async function toggleOpportunityPublication(listing: AdminOpportunityListing) {
+    if (!supabase || !isAdmin) return;
+    const nextPublished = !listing.isPublished;
+    try {
+      const { error } = await supabase
+        .from("listings")
+        .update({
+          is_published: nextPublished,
+          is_expired: false,
+          verification_status: nextPublished && listing.verificationStatus === "pending" ? "source-linked" : listing.verificationStatus,
+          verified: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", listing.id);
+
+      if (error) {
+        showToast(`Could not update opportunity: ${error.message}`, "error");
+        return;
+      }
+
+      setOpportunityRows((rows) =>
+        rows.map((row) => (row.id === listing.id ? { ...row, isPublished: nextPublished } : row))
+      );
+      showToast(nextPublished ? `Published: "${listing.title}"` : `Unpublished: "${listing.title}"`, "success");
+      setOpportunityRowsRefreshRevision((r) => r + 1);
+      window.dispatchEvent(new Event("techcircuit:listings-updated"));
+    } catch {
+      showToast("Error toggling opportunity publication.", "error");
+    }
+  }
+
+  // Delete opportunity
+  async function deleteOpportunity(listing: AdminOpportunityListing) {
+    if (!supabase || !isAdmin) return;
+    if (!window.confirm(`Are you sure you want to permanently delete "${listing.title}"?`)) return;
+
+    try {
+      const { error } = await supabase.from("listings").delete().eq("id", listing.id);
+      if (error) {
+        showToast(`Could not delete opportunity: ${error.message}`, "error");
+        return;
+      }
+      setOpportunityRows((rows) => rows.filter((row) => row.id !== listing.id));
+      showToast(`Deleted "${listing.title}"`, "success");
+      setOpportunityRowsRefreshRevision((r) => r + 1);
+      window.dispatchEvent(new Event("techcircuit:listings-updated"));
+    } catch {
+      showToast("Error deleting opportunity.", "error");
+    }
+  }
+
+  // Start create opportunity
+  function startCreateOpportunity() {
+    setEditingOppId("");
+    setOppKind("Internships");
+    setOppTitle("");
+    setOppOrg("");
+    setOppCity("");
+    setOppSummary("");
+    setOppUrl("");
+    setOppFormOpen(true);
+  }
+
+  // Start edit opportunity
+  function startEditOpportunity(listing: AdminOpportunityListing) {
+    setEditingOppId(listing.id);
+    setOppKind(listing.kind);
+    setOppTitle(listing.title);
+    setOppOrg(listing.organization);
+    setOppCity(listing.city);
+    setOppSummary(listing.summary);
+    setOppUrl(listing.sourceUrl);
+    setOppFormOpen(true);
+    window.scrollTo({ top: 120, behavior: "smooth" });
+  }
+
+  // Save opportunity
+  async function saveOpportunity(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase || !isAdmin) return;
+
+    const validatedUrl = safeExternalUrl(oppUrl.trim());
+    if (!oppTitle.trim() || !oppOrg.trim() || !oppCity.trim() || !oppSummary.trim() || !validatedUrl) {
+      showToast("Please enter all required fields with a valid https:// URL.", "error");
       return;
     }
+
+    setOppSaving(true);
+    try {
+      const oppPayload = {
+        kind: oppKind,
+        title: oppTitle.trim(),
+        organization: oppOrg.trim(),
+        city: oppCity.trim(),
+        summary: oppSummary.trim(),
+        source_url: validatedUrl,
+        tags: [],
+        verification_status: "source-linked",
+        verified: false,
+        is_published: true,
+        is_expired: false,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (editingOppId) {
+        const { error } = await supabase.from("listings").update(oppPayload).eq("id", editingOppId);
+        if (error) throw error;
+        showToast(`Updated opportunity: "${oppTitle.trim()}"`, "success");
+      } else {
+        const { error } = await supabase.from("listings").insert(oppPayload);
+        if (error) throw error;
+        showToast(`Created and published: "${oppTitle.trim()}"`, "success");
+      }
+
+      setOppFormOpen(false);
+      setEditingOppId("");
+      setOppTitle("");
+      setOppOrg("");
+      setOppCity("");
+      setOppSummary("");
+      setOppUrl("");
+      setOpportunityRowsRefreshRevision((r) => r + 1);
+      window.dispatchEvent(new Event("techcircuit:listings-updated"));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not save opportunity.", "error");
+    } finally {
+      setOppSaving(false);
+    }
+  }
+
+  // Start create component
+  function startCreateComponent() {
+    setEditingProductId("");
+    setCompTitle("");
+    setCompOrg("");
+    setCompMpn("");
+    setCompCategory("");
+    setCompSummary("");
+    setCompImageUrl("");
+    setOfferDrafts([newComponentOfferDraft(), newComponentOfferDraft()]);
+    setCompFormOpen(true);
+  }
+
+  // Start edit component
+  function startEditComponent(id: string) {
     const product = productRows.find((item) => item.id === id);
     const details = product?.componentDetails;
     if (!product || !details) return;
-    setTitle(product.title);
-    setOrganization(product.organization);
-    setSummary(product.summary);
-    setSourceUrl(product.sourceUrl ?? "");
-    setMpn(details.mpn);
-    setComponentCategory(details.category);
-    setComponentImageUrl(details.imageUrl);
+
+    setEditingProductId(id);
+    setCompTitle(product.title);
+    setCompOrg(product.organization);
+    setCompSummary(product.summary);
+    setCompMpn(details.mpn);
+    setCompCategory(details.category);
+    setCompImageUrl(details.imageUrl);
     setOfferDrafts([
       componentOfferToDraft(details.offers[0]),
       componentOfferToDraft(details.offers[1]),
     ]);
+    setCompFormOpen(true);
+    window.scrollTo({ top: 120, behavior: "smooth" });
   }
 
-  async function signIn(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!supabase) return;
-    setMessage("");
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      setMessage(`Sign-in failed: ${error.message}`);
-      return;
-    }
-    const authorized = await checkAdmin(supabase, data.user.id, setIsAdmin, setMessage);
-    if (authorized) {
-      setAdminEmail(data.user.email ?? "");
-      setAdminSection("overview");
-    } else {
-      const { error: signOutError } = await supabase.auth.signOut();
-      if (signOutError) setMessage(`This account is not an admin, and sign-out failed: ${signOutError.message}`);
-    }
-  }
+  // Delete component
+  async function deleteComponent(product: Listing) {
+    if (!supabase || !isAdmin) return;
+    if (!window.confirm(`Permanently remove "${product.title}" (${product.componentDetails?.mpn}) from catalog?`)) return;
 
-  async function signOut() {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signOut();
-    if (error) setMessage(`Sign-out failed: ${error.message}`);
-    else {
-      setIsAdmin(false);
-      setAdminEmail("");
-      setMessage("");
-      onExit();
+    try {
+      const { error } = await supabase.from("listings").delete().eq("id", product.id);
+      if (error) {
+        showToast(`Could not delete component: ${error.message}`, "error");
+        return;
+      }
+      setProductRows((rows) => rows.filter((r) => r.id !== product.id));
+      showToast(`Removed "${product.title}" from catalog.`, "success");
+      setProductRowsRefreshRevision((r) => r + 1);
+      window.dispatchEvent(new Event("techcircuit:listings-updated"));
+    } catch {
+      showToast("Error deleting component.", "error");
     }
   }
 
-  async function publish(event: React.FormEvent<HTMLFormElement>) {
+  // Save component
+  async function saveComponent(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase || !isAdmin) return;
-    setMessage("");
-    if (kind === "Products") {
-      const enteredOffers = offerDrafts.filter((offer) =>
-        Boolean(offer.seller.trim() || offer.price.trim() || offer.sellerUrl.trim()),
-      );
-      const normalizedOffers = enteredOffers.map((offer) => {
-        const price = Number(offer.price);
-        const quantity = Number(offer.quantity);
-        const stock = offer.stock ? Number(offer.stock) : null;
-        const moq = offer.moq ? Number(offer.moq) : null;
-        return {
-          seller: offer.seller.trim(),
-          price,
-          currency: offer.currency.trim().toUpperCase(),
-          quantity,
-          stock,
-          moq,
-          sellerUrl: safeExternalUrl(offer.sellerUrl.trim()),
-          checkedAt: offer.checkedAt,
-        };
-      });
-      const invalidOffer = normalizedOffers.some((offer) =>
-        !offer.seller
-        || !Number.isFinite(offer.price)
-        || offer.price <= 0
-        || !/^[A-Z]{3}$/.test(offer.currency)
-        || !Number.isInteger(offer.quantity)
-        || offer.quantity < 1
-        || (offer.stock !== null && (!Number.isInteger(offer.stock) || offer.stock < 0))
-        || (offer.moq !== null && (!Number.isInteger(offer.moq) || offer.moq < 1))
-        || !offer.sellerUrl
-        || !offer.checkedAt
-      );
-      if (!title.trim() || !organization.trim() || !summary.trim() || !mpn.trim() || normalizedOffers.length === 0 || invalidOffer) {
-        setMessage("Enter the component details and at least one complete seller offer with a valid https link, price, currency and check date.");
-        return;
-      }
-      if (componentImageUrl.trim() && !safeExternalUrl(componentImageUrl.trim())) {
-        setMessage("The component image must use a valid https URL.");
-        return;
-      }
+
+    const enteredOffers = offerDrafts.filter((offer) =>
+      Boolean(offer.seller.trim() || offer.price.trim() || offer.sellerUrl.trim())
+    );
+
+    const normalizedOffers = enteredOffers.map((offer) => {
+      const price = Number(offer.price);
+      const quantity = Number(offer.quantity);
+      const stock = offer.stock ? Number(offer.stock) : null;
+      const moq = offer.moq ? Number(offer.moq) : null;
+      return {
+        seller: offer.seller.trim(),
+        price,
+        currency: offer.currency.trim().toUpperCase(),
+        quantity,
+        stock,
+        moq,
+        sellerUrl: safeExternalUrl(offer.sellerUrl.trim()),
+        checkedAt: offer.checkedAt,
+      };
+    });
+
+    const invalidOffer = normalizedOffers.some(
+      (offer) =>
+        !offer.seller ||
+        !Number.isFinite(offer.price) ||
+        offer.price <= 0 ||
+        !/^[A-Z]{3}$/.test(offer.currency) ||
+        !Number.isInteger(offer.quantity) ||
+        offer.quantity < 1 ||
+        (offer.stock !== null && (!Number.isInteger(offer.stock) || offer.stock < 0)) ||
+        (offer.moq !== null && (!Number.isInteger(offer.moq) || offer.moq < 1)) ||
+        !offer.sellerUrl ||
+        !offer.checkedAt
+    );
+
+    if (!compTitle.trim() || !compOrg.trim() || !compSummary.trim() || !compMpn.trim() || normalizedOffers.length === 0 || invalidOffer) {
+      showToast("Complete all component details and at least one seller offer with valid price, currency, and URL.", "error");
+      return;
+    }
+
+    if (compImageUrl.trim() && !safeExternalUrl(compImageUrl.trim())) {
+      showToast("Component image URL must begin with https://", "error");
+      return;
+    }
+
+    setCompSaving(true);
+    try {
       const productValues = {
-        kind: "Products",
-        title: title.trim(),
-        organization: organization.trim(),
+        kind: "Products" as const,
+        title: compTitle.trim(),
+        organization: compOrg.trim(),
         city: "Online",
-        summary: summary.trim(),
+        summary: compSummary.trim(),
         source_url: normalizedOffers[0].sellerUrl,
-        tags: componentCategory.trim() ? [componentCategory.trim()] : [],
+        tags: compCategory.trim() ? [compCategory.trim()] : [],
         details: {
-          mpn: mpn.trim(),
-          category: componentCategory.trim(),
-          imageUrl: componentImageUrl.trim() ? safeExternalUrl(componentImageUrl.trim()) : "",
+          mpn: compMpn.trim(),
+          category: compCategory.trim(),
+          imageUrl: compImageUrl.trim() ? safeExternalUrl(compImageUrl.trim()) : "",
           offers: normalizedOffers,
         },
         verification_status: "verified",
@@ -3138,306 +6713,2329 @@ function AdminPage({ onExit }: { onExit: () => void }) {
         is_expired: false,
         updated_at: new Date().toISOString(),
       };
+
       const result = editingProductId
         ? await supabase.from("listings").update(productValues).eq("id", editingProductId)
         : await supabase.from("listings").insert(productValues);
-      if (result.error) {
-        setMessage(`Could not save component: ${result.error.message}`);
-        return;
-      }
+
+      if (result.error) throw result.error;
+
+      setCompFormOpen(false);
+      setEditingProductId("");
+      setCompTitle("");
+      setCompOrg("");
+      setCompMpn("");
+      setCompCategory("");
+      setCompSummary("");
+      setCompImageUrl("");
+      setOfferDrafts([newComponentOfferDraft(), newComponentOfferDraft()]);
+      setProductRowsRefreshRevision((r) => r + 1);
       window.dispatchEvent(new Event("techcircuit:listings-updated"));
-      const wasEditing = Boolean(editingProductId);
-      try {
-        setProductRows(await loadAdminComponentListings(supabase));
-      } catch (error) {
-        setMessage(error instanceof Error ? `Component saved, but the admin list could not refresh: ${error.message}` : "Component saved, but the admin list could not refresh.");
-        return;
-      }
-      editComponent("");
-      setMessage(wasEditing ? "Component and seller offers updated." : "Component published with two seller offers.");
-      return;
+      showToast(editingProductId ? "Component and seller offers updated." : "Component added to comparison catalog.", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not save component.", "error");
+    } finally {
+      setCompSaving(false);
     }
-    if (["Internships", "Training", "Hackathons"].includes(kind)) {
-      const opportunityUrl = safeExternalUrl(sourceUrl.trim());
-      if (!title.trim() || !organization.trim() || !city.trim() || !summary.trim() || !opportunityUrl) {
-        setMessage("Enter the opportunity details and a valid https source or official application link.");
-        return;
-      }
-      const { error } = await supabase.from("listings").insert({
-        kind,
-        title: title.trim(),
-        organization: organization.trim(),
-        city: city.trim(),
-        summary: summary.trim(),
-        source_url: opportunityUrl,
-        tags: [],
-        verification_status: "source-linked",
-        verified: false,
-        is_published: true,
-        is_expired: false,
-        updated_at: new Date().toISOString(),
-      });
-      if (error) {
-        setMessage(`Could not publish opportunity: ${error.message}`);
-        return;
-      }
-      setTitle("");
-      setOrganization("");
-      setCity("");
-      setSummary("");
-      setSourceUrl("");
-      setMessage("Source-linked opportunity published.");
-      setOpportunityRowsRefreshRevision((revision) => revision + 1);
-      window.dispatchEvent(new Event("techcircuit:listings-updated"));
-      return;
-    }
-    const { error } = await supabase.from("listings").insert({
-      kind, title, organization, city, summary,
-      source_url: sourceUrl,
-      tags: [],
-      updated_at: new Date().toISOString(),
-      is_published: false,
-    });
-    if (error) {
-      setMessage(`Could not save listing: ${error.message}`);
-      return;
-    }
-    setTitle(""); setOrganization(""); setCity(""); setSummary(""); setSourceUrl("");
-    setMessage("Draft saved for review. Publish it after checking its source and details.");
   }
 
-  function renderOfferEditor(index: number) {
-    const offer = offerDrafts[index];
-    const update = (field: keyof ComponentOfferDraft, value: string) => {
-      setOfferDrafts((current) => index === 0
+  // Update offer field
+  function updateOfferDraft(index: number, field: keyof ComponentOfferDraft, value: string) {
+    setOfferDrafts((current) =>
+      index === 0
         ? [{ ...current[0], [field]: value }, current[1]]
-        : [current[0], { ...current[1], [field]: value }]);
-    };
-    return (
-      <fieldset className="component-admin-offer">
-        <legend>Seller offer {index + 1}</legend>
-        <label>Retailer<input required={index === 0} value={offer.seller} onChange={(event) => update("seller", event.target.value)} placeholder={index === 0 ? "DigiKey" : "Mouser (optional)"} /></label>
-        <label>Price per unit<input required={index === 0} type="number" min="0.0001" step="any" value={offer.price} onChange={(event) => update("price", event.target.value)} /></label>
-        <label>Currency code<input required={index === 0} minLength={3} maxLength={3} value={offer.currency} onChange={(event) => update("currency", event.target.value)} placeholder="USD" /></label>
-        <label>Price quantity<input required={index === 0} type="number" min="1" step="1" value={offer.quantity} onChange={(event) => update("quantity", event.target.value)} /></label>
-        <label>Stock (optional)<input type="number" min="0" step="1" value={offer.stock} onChange={(event) => update("stock", event.target.value)} /></label>
-        <label>Minimum order (optional)<input type="number" min="1" step="1" value={offer.moq} onChange={(event) => update("moq", event.target.value)} /></label>
-        <label className="admin-full">Seller product URL<input required={index === 0} type="url" value={offer.sellerUrl} onChange={(event) => update("sellerUrl", event.target.value)} placeholder="https://" /></label>
-        <label className="admin-full">Price checked on<input required={index === 0} type="date" value={offer.checkedAt} onChange={(event) => update("checkedAt", event.target.value)} /></label>
-      </fieldset>
+        : [current[0], { ...current[1], [field]: value }]
     );
   }
 
+  // Filtered lists
+  const filteredOpportunities = useMemo(() => {
+    return opportunityRows.filter((item) => {
+      if (oppKindFilter !== "all" && item.kind !== oppKindFilter) return false;
+      if (oppStatusFilter === "published" && !item.isPublished) return false;
+      if (oppStatusFilter === "draft" && item.isPublished) return false;
+      if (oppSearch.trim()) {
+        const query = oppSearch.toLowerCase();
+        const text = `${item.title} ${item.organization} ${item.city} ${item.summary}`.toLowerCase();
+        if (!text.includes(query)) return false;
+      }
+      return true;
+    });
+  }, [opportunityRows, oppKindFilter, oppStatusFilter, oppSearch]);
+
+  const filteredComponents = useMemo(() => {
+    return productRows.filter((item) => {
+      if (!compSearch.trim()) return true;
+      const query = compSearch.toLowerCase();
+      const details = item.componentDetails;
+      const text = `${item.title} ${item.organization} ${details?.mpn ?? ""} ${details?.category ?? ""} ${item.summary}`.toLowerCase();
+      return text.includes(query);
+    });
+  }, [productRows, compSearch]);
+
+  const filteredActivities = useMemo(() => {
+    return opportunityActivities.filter((act) => {
+      if (activityStatusFilter !== "all" && act.status !== activityStatusFilter) return false;
+      if (activityKindFilter !== "all" && act.opportunity_kind !== activityKindFilter) return false;
+      if (activitySearch.trim()) {
+        const query = activitySearch.toLowerCase();
+        const text = `${act.student_name} ${act.institution} ${act.course} ${act.title} ${act.organization}`.toLowerCase();
+        if (!text.includes(query)) return false;
+      }
+      return true;
+    });
+  }, [opportunityActivities, activityStatusFilter, activityKindFilter, activitySearch]);
+
+  const publishedOppCount = opportunityRows.filter((r) => r.isPublished).length;
+  const draftOppCount = opportunityRows.filter((r) => !r.isPublished).length;
+  const appliedCount = opportunityActivities.filter((a) => a.status === "applied").length;
+  const visitedCount = opportunityActivities.filter((a) => a.status === "visited").length;
+
   return (
     <div className="admin-app">
-        {!supabase ? (
-          <div className="admin-login-screen">
-            <div className="admin-login-brand"><img className="brand-logo" src={brandLogo} alt={PLATFORM_NAME} /><button className="button button-outline button-small" onClick={onExit}>Back to website</button></div>
-            <div className="admin-login">
-              <div className="admin-lock"><ShieldCheck size={26} /></div>
-              <span className="eyebrow"><span className="eyebrow-line" /> SECURE ADMIN ACCESS</span>
-              <h2>Connect your Supabase project.</h2>
-              <p>Admin sign-in and listing management require your Supabase project configuration.</p>
-              <div className="env-block"><code>VITE_SUPABASE_URL=your-project-url</code><code>VITE_SUPABASE_ANON_KEY=your-anon-key</code></div>
-              <p className="admin-security-note"><ShieldCheck size={16} /> Admin access is enforced by database roles and row-level security policies — never by a client-side password.</p>
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`admin-toast-float admin-toast-${toast.type}`} role="alert">
+          <div className="admin-toast-icon">
+            {toast.type === "success" && <CheckCircle2 size={18} />}
+            {toast.type === "error" && <AlertCircle size={18} />}
+            {toast.type === "info" && <CircleHelp size={18} />}
+          </div>
+          <span className="admin-toast-text">{toast.message}</span>
+          <button className="admin-toast-dismiss" onClick={() => setToast(null)} aria-label="Dismiss">
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
+      {!supabase ? (
+        <div className="admin-login-screen">
+          <div className="admin-login-card">
+            <div className="admin-login-top-bar">
+              <button className="button button-outline button-small" onClick={onExit} type="button">
+                <ArrowLeft size={14} /> Back to Website
+              </button>
+            </div>
+            <div className="admin-login-center-logo">
+              <img className="admin-center-logo" src={brandLogo} alt={PLATFORM_NAME} />
+            </div>
+            <div className="admin-login-body">
+              <div className="admin-login-icon">
+                <ShieldCheck size={30} />
+              </div>
+              <span className="eyebrow"><span className="eyebrow-line" /> CONFIGURATION REQUIRED</span>
+              <h2>Supabase Database Connection</h2>
+              <p>Admin sign-in and data management require Supabase project credentials in your local environment file.</p>
+              <div className="env-block">
+                <code>VITE_SUPABASE_URL=your-project-url</code>
+                <code>VITE_SUPABASE_ANON_KEY=your-anon-key</code>
+              </div>
+              <p className="admin-security-note">
+                <ShieldCheck size={16} /> Admin access is enforced by database roles and row-level security policies.
+              </p>
             </div>
           </div>
-        ) : !isAdmin ? (
-          <div className="admin-login-screen">
-            <div className="admin-login-brand"><img className="brand-logo" src={brandLogo} alt={PLATFORM_NAME} /><button className="button button-outline button-small" onClick={onExit}>Back to website</button></div>
-            <div className="admin-login">
-              <div className="admin-lock"><ShieldCheck size={26} /></div>
-              <span className="eyebrow"><span className="eyebrow-line" /> AUTHORIZED ADMINS ONLY</span>
-              <h2>Admin sign in.</h2>
-              <p>Use your Supabase admin account. Admin permissions are granted securely in the database.</p>
-              <form onSubmit={signIn} className="admin-form">
-                <label>Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-                <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-                <button className="button button-dark" type="submit">Sign in securely <ArrowRight size={15} /></button>
+        </div>
+      ) : !isAdmin ? (
+        <div className="admin-login-screen">
+          <div className="admin-login-card">
+            <div className="admin-login-top-bar">
+              <button className="button button-outline button-small" onClick={onExit} type="button">
+                <ArrowLeft size={14} /> Back to Website
+              </button>
+            </div>
+            <div className="admin-login-center-logo">
+              <img className="admin-center-logo" src={brandLogo} alt={PLATFORM_NAME} />
+            </div>
+            <div className="admin-login-body">
+              <div className="admin-login-badge">
+                <Lock size={14} />
+                <span>ADMIN CONSOLE</span>
+              </div>
+              <h2>Admin Console Sign In</h2>
+              <p>Sign in with your database-authorized administrator account.</p>
+
+              {authError && (
+                <div className="admin-alert-banner" role="alert">
+                  <AlertCircle size={18} />
+                  <span>{authError}</span>
+                  <button type="button" onClick={() => setAuthError("")} aria-label="Dismiss error">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              <form onSubmit={signIn} className="admin-login-form">
+                <div className="admin-input-group">
+                  <label htmlFor="admin-email">Administrator Email</label>
+                  <div className="admin-input-wrapper">
+                    <Mail size={17} className="admin-field-icon" />
+                    <input
+                      id="admin-email"
+                      type="email"
+                      autoComplete="username"
+                      required
+                      placeholder="admin@techcircuithub.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="admin-input-group">
+                  <label htmlFor="admin-password">Secure Password</label>
+                  <div className="admin-input-wrapper">
+                    <Lock size={17} className="admin-field-icon" />
+                    <input
+                      id="admin-password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      required
+                      placeholder="••••••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="admin-field-action"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <button className="button button-dark admin-submit-btn" type="submit" disabled={authBusy}>
+                  {authBusy ? (
+                    <>
+                      <RefreshCw size={16} className="spin-icon" /> Verifying Credentials…
+                    </>
+                  ) : (
+                    <>
+                      Sign In to Console <ArrowRight size={16} />
+                    </>
+                  )}
+                </button>
               </form>
-              {message && <p className="admin-message" role="status">{message}</p>}
+
+              <div className="admin-login-footer">
+                <div className="admin-db-status">
+                  <span className="live-dot" /> Database Connected (Supabase RLS Active)
+                </div>
+              </div>
             </div>
           </div>
-        ) : (
-          <div className="admin-layout">
-            {mobileMenuOpen && <button className="admin-drawer-backdrop" type="button" aria-label="Close admin menu" onClick={() => setMobileMenuOpen(false)} />}
-            <aside className={`admin-sidebar${mobileMenuOpen ? " mobile-open" : ""}`}>
-              <button className="admin-sidebar-brand" type="button" onClick={() => setAdminSection("overview")}><img className="brand-logo" src={brandLogo} alt={PLATFORM_NAME} /><span>ADMIN CONSOLE</span></button>
+        </div>
+      ) : (
+        <div className="admin-layout">
+          {mobileMenuOpen && (
+            <button
+              className="admin-drawer-backdrop"
+              type="button"
+              aria-label="Close admin menu"
+              onClick={() => setMobileMenuOpen(false)}
+            />
+          )}
+
+          {/* Elevated Modern Sidebar */}
+          <aside className={`admin-sidebar${mobileMenuOpen ? " mobile-open" : ""}`}>
+            <div className="admin-sidebar-header">
+              <button className="admin-sidebar-brand" type="button" onClick={() => setAdminSection("overview")}>
+                <img className="brand-logo" src={brandLogo} alt={PLATFORM_NAME} />
+                <div className="admin-brand-chip">
+                  <span>ADMIN HQ</span>
+                  <span className="admin-version-pill">v2.4</span>
+                </div>
+              </button>
+            </div>
+
+            <div className="admin-sidebar-nav-container">
               <div className="admin-sidebar-label">WORKSPACE</div>
               <nav id="admin-dashboard-navigation" className="admin-side-nav" aria-label="Admin dashboard">
-                {([
+                {[
                   { id: "overview", label: "Overview", icon: LayoutDashboard },
-                  { id: "publish", label: "Publish & manage", icon: ClipboardList },
-                  { id: "activity", label: "Student activity", icon: Activity },
-                  { id: "profile", label: "Admin profile", icon: UserCog },
-                ] as const).map(({ id, label, icon: Icon }) => (
-                  <button className={adminSection === id ? "admin-side-link active" : "admin-side-link"} key={id} type="button" onClick={() => { setAdminSection(id); setMobileMenuOpen(false); }}>
-                    <Icon size={17} /><span>{label}</span>
-                    {id === "activity" && opportunityActivities.length > 0 && <span className="admin-side-count">{opportunityActivities.length}</span>}
+                  {
+                    id: "orders",
+                    label: "Orders & Tracking",
+                    icon: PackageCheck,
+                    count: adminOrders.filter(
+                      (o) =>
+                        o.payment_status === "PAID" &&
+                        o.tracking_status !== "Delivered" &&
+                        o.tracking_status !== "Cancelled" &&
+                        o.tracking_status !== "Refunded"
+                    ).length,
+                  },
+                  {
+                    id: "opportunities",
+                    label: "Opportunities",
+                    icon: BriefcaseBusiness,
+                    count: opportunityRows.length,
+                  },
+                  {
+                    id: "components",
+                    label: "Component Catalog",
+                    icon: Cpu,
+                    count: productRows.length,
+                  },
+                  {
+                    id: "activity",
+                    label: "Student Activity",
+                    icon: Activity,
+                    count: opportunityActivities.length,
+                  },
+                ].map(({ id, label, icon: Icon, count }) => (
+                  <button
+                    className={`admin-side-link ${adminSection === id ? "active" : ""}`}
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      setAdminSection(id as AdminSection);
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    <Icon size={18} />
+                    <span className="admin-link-title">{label}</span>
+                    {typeof count === "number" && count > 0 && (
+                      <span className="admin-side-count">{count}</span>
+                    )}
                   </button>
                 ))}
               </nav>
-              <div className="admin-sidebar-bottom">
-                <div className="admin-sidebar-user"><span className="admin-sidebar-avatar"><UserRound size={17} /></span><span><strong>Administrator</strong><small>{adminEmail}</small></span></div>
-                <button className="admin-side-link admin-logout" type="button" onClick={() => void signOut()}><LogOut size={17} /><span>Log out</span></button>
-                <button className="admin-side-link admin-back-site" type="button" onClick={onExit}><ArrowLeft size={17} /><span>Back to website</span></button>
+
+              <div className="admin-sidebar-label" style={{ marginTop: 24 }}>ACCOUNT & SYSTEM</div>
+              <nav className="admin-side-nav" aria-label="Account navigation">
+                <button
+                  className={`admin-side-link ${adminSection === "profile" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setAdminSection("profile");
+                    setMobileMenuOpen(false);
+                  }}
+                >
+                  <UserCog size={18} />
+                  <span className="admin-link-title">Admin Profile</span>
+                </button>
+              </nav>
+            </div>
+
+            <div className="admin-sidebar-bottom">
+              <div className="admin-user-card">
+                <div className="admin-user-avatar">
+                  <UserRound size={18} />
+                </div>
+                <div className="admin-user-meta">
+                  <strong>Administrator</strong>
+                  <small title={adminEmail}>{adminEmail || "admin"}</small>
+                </div>
               </div>
-            </aside>
-            <section className="admin-main">
-              <header className="admin-topbar">
-                <div className="admin-topbar-start">
-                  <button className="admin-menu-toggle" type="button" aria-label={mobileMenuOpen ? "Close admin menu" : "Open admin menu"} aria-expanded={mobileMenuOpen} aria-controls="admin-dashboard-navigation" onClick={() => setMobileMenuOpen((open) => !open)}>
-                    {mobileMenuOpen ? <X size={19} /> : <Menu size={19} />}
-                  </button>
-                  <div><span>ADMIN CONTROL CENTER</span><h1>{adminSection === "overview" ? "Overview" : adminSection === "publish" ? "Publish & manage" : adminSection === "activity" ? "Student activity" : "Admin profile"}</h1></div>
+              <div className="admin-user-actions">
+                <button
+                  className="admin-side-link admin-back-site"
+                  type="button"
+                  onClick={onExit}
+                  title="Return to the student catalog"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Exit Console</span>
+                </button>
+                <button
+                  className="admin-side-link admin-logout"
+                  type="button"
+                  onClick={() => void signOut()}
+                  title="Sign out of admin session"
+                >
+                  <LogOut size={16} />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
+          </aside>
+
+          {/* Main Dashboard Canvas */}
+          <section className="admin-main">
+            {/* Topbar */}
+            <header className="admin-topbar">
+              <div className="admin-topbar-start">
+                <button
+                  className="admin-menu-toggle"
+                  type="button"
+                  aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+                  aria-expanded={mobileMenuOpen}
+                  onClick={() => setMobileMenuOpen((open) => !open)}
+                >
+                  {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+                </button>
+                <div className="admin-breadcrumbs">
+                  <span className="admin-crumb-parent">Console</span>
+                  <span className="admin-crumb-sep">/</span>
+                  <h1 className="admin-crumb-current">
+                    {adminSection === "overview" && "Executive Overview"}
+                    {adminSection === "orders" && "Hardware Kit Orders & Tracking"}
+                    {adminSection === "opportunities" && "Opportunity Management"}
+                    {adminSection === "components" && "Component Catalog & Offers"}
+                    {adminSection === "activity" && "Student Activity Tracker"}
+                    {adminSection === "profile" && "Administrator Profile"}
+                  </h1>
                 </div>
-                <div className="admin-topbar-account"><span className="admin-sidebar-avatar"><UserRound size={17} /></span><span>{adminEmail}</span></div>
-              </header>
-              <div className="admin-content admin-view">
-            {adminSection === "overview" && (
-              <section className="admin-dashboard-overview">
-                <div className="admin-welcome-card"><div><span className="eyebrow"><span className="eyebrow-line" /> ADMIN WORKSPACE</span><h2>Welcome back.</h2><p>Manage opportunities and components, and review student follow-up from one place.</p></div><ShieldCheck size={30} /></div>
-                <div className="admin-metric-grid">
-                  <button className="admin-metric-card" type="button" onClick={() => setAdminSection("publish")}><span>OPPORTUNITIES</span><strong>{opportunityRows.filter((listing) => listing.isPublished).length}</strong><small>Published opportunities</small></button>
-                  <button className="admin-metric-card" type="button" onClick={() => setAdminSection("publish")}><span>COMPONENTS</span><strong>{productRows.length}</strong><small>Catalog entries</small></button>
-                  <button className="admin-metric-card" type="button" onClick={() => setAdminSection("activity")}><span>STUDENT ACTIVITY</span><strong>{opportunityActivities.length}</strong><small>Visit and application updates</small></button>
-                </div>
-                <section className="admin-overview-section">
-                  <div className="admin-subsection-head"><div><span className="eyebrow"><span className="eyebrow-line" /> RECENT UPDATES</span><h3>Latest student activity</h3></div><button className="text-link" type="button" onClick={() => setAdminSection("activity")}>View all activity <ArrowRight size={14} /></button></div>
-                  {activityLoading ? <p className="admin-help">Loading activity…</p> : activityError ? <p className="admin-message" role="alert">{activityError}</p> : opportunityActivities.length === 0 ? <p className="admin-help">Student activity will appear here when students track opportunities.</p> : (
-                    <div className="admin-record-list">{opportunityActivities.slice(0, 5).map((activity) => (
-                      <article className="admin-record admin-activity-record" key={`${activity.user_id}-${activity.opportunity_id}`}>
-                        <div className="admin-record-copy"><span className={`opportunity-activity-status ${activity.status}`}>{activity.status === "applied" ? "Student marked applied / registered" : "Student visited"}</span><h4>{activity.title}</h4><p>{activity.student_name} · {activity.opportunity_kind} · {activity.organization}</p></div>
-                        <button className="button button-outline button-small" type="button" onClick={() => setAdminSection("activity")}>View activity</button>
-                      </article>
-                    ))}</div>
+              </div>
+
+              <div className="admin-topbar-end">
+                <button
+                  className="button button-outline button-small admin-preview-btn"
+                  type="button"
+                  onClick={onExit}
+                  title="Open the student-facing catalog"
+                >
+                  <ExternalLink size={14} />
+                  <span>Preview Website</span>
+                </button>
+              </div>
+            </header>
+
+            {/* View Container */}
+            <div className="admin-content admin-view">
+              {/* SECTION: OVERVIEW */}
+              {adminSection === "overview" && (
+                <section className="admin-overview-view">
+                  {/* Executive Hero Banner */}
+                  <div className="admin-hero-banner">
+                    <div className="admin-hero-content">
+                      <div className="admin-hero-eyebrow">
+                        <Sparkles size={15} />
+                        <span>TECHCIRCUIT COMMAND CENTER</span>
+                      </div>
+                      <h2>
+                        {(() => {
+                          const hour = new Date().getHours();
+                          if (hour < 12) return "Good morning";
+                          if (hour < 17) return "Good afternoon";
+                          return "Good evening";
+                        })()}
+                        , Administrator.
+                      </h2>
+                      <p>
+                        Real-time hub for student internships, corporate training, hackathons, and electronics component price intelligence.
+                      </p>
+                      <div className="admin-hero-actions">
+                        <button
+                          className="button button-primary"
+                          type="button"
+                          onClick={() => {
+                            setAdminSection("opportunities");
+                            startCreateOpportunity();
+                          }}
+                        >
+                          <Plus size={16} /> New Opportunity
+                        </button>
+                        <button
+                          className="button button-outline admin-hero-outline-btn"
+                          type="button"
+                          onClick={() => {
+                            setAdminSection("components");
+                            startCreateComponent();
+                          }}
+                        >
+                          <Plus size={16} /> Add Component
+                        </button>
+                        <button
+                          className="button button-outline admin-hero-outline-btn"
+                          type="button"
+                          onClick={() => setAdminSection("activity")}
+                        >
+                          <Activity size={16} /> View Activity Feed
+                        </button>
+                      </div>
+                    </div>
+                    <div className="admin-hero-graphic">
+                      <CircuitBoard size={96} className="circuit-accent" />
+                    </div>
+                  </div>
+
+                  {/* 4 Interactive KPI Metric Cards */}
+                  <div className="admin-kpi-grid">
+                    <div
+                      className="admin-kpi-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setAdminSection("opportunities")}
+                    >
+                      <div className="admin-kpi-header">
+                        <span className="admin-kpi-title">OPPORTUNITIES</span>
+                        <div className="admin-kpi-icon icon-cyan">
+                          <BriefcaseBusiness size={20} />
+                        </div>
+                      </div>
+                      <div className="admin-kpi-metric">{opportunityRows.length}</div>
+                      <div className="admin-kpi-sub">
+                        <span className="badge badge-success">{publishedOppCount} Published</span>
+                        <span className="badge badge-draft">{draftOppCount} Drafts</span>
+                      </div>
+                    </div>
+
+                    <div
+                      className="admin-kpi-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setAdminSection("orders")}
+                    >
+                      <div className="admin-kpi-header">
+                        <span className="admin-kpi-title">HARDWARE ORDERS</span>
+                        <div className="admin-kpi-icon" style={{ background: "#FFE6D5", color: "#F97316" }}>
+                          <PackageCheck size={20} />
+                        </div>
+                      </div>
+                      <div className="admin-kpi-metric">{adminOrders.length}</div>
+                      <div className="admin-kpi-sub">
+                        <span className="badge badge-success">{newOrdersCount} New</span>
+                        <span className="badge" style={{ background: "#FEF3C7", color: "#B45309" }}>{inBuildOrdersCount} In Build</span>
+                      </div>
+                    </div>
+
+                    <div
+                      className="admin-kpi-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setAdminSection("components")}
+                    >
+                      <div className="admin-kpi-header">
+                        <span className="admin-kpi-title">COMPONENTS</span>
+                        <div className="admin-kpi-icon icon-violet">
+                          <Cpu size={20} />
+                        </div>
+                      </div>
+                      <div className="admin-kpi-metric">{productRows.length}</div>
+                      <div className="admin-kpi-sub">
+                        <span className="badge badge-info">Dual Seller Verified</span>
+                      </div>
+                    </div>
+
+                    <div
+                      className="admin-kpi-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setAdminSection("activity")}
+                    >
+                      <div className="admin-kpi-header">
+                        <span className="admin-kpi-title">STUDENT TRACKS</span>
+                        <div className="admin-kpi-icon icon-amber">
+                          <TrendingUp size={20} />
+                        </div>
+                      </div>
+                      <div className="admin-kpi-metric">{opportunityActivities.length}</div>
+                      <div className="admin-kpi-sub">
+                        <span className="badge badge-applied">{appliedCount} Applied</span>
+                        <span className="badge badge-visited">{visitedCount} Inquiries</span>
+                      </div>
+                    </div>
+
+                    <div
+                      className="admin-kpi-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setAdminSection("profile")}
+                    >
+                      <div className="admin-kpi-header">
+                        <span className="admin-kpi-title">SECURITY & RLS</span>
+                        <div className="admin-kpi-icon icon-emerald">
+                          <ShieldCheck size={20} />
+                        </div>
+                      </div>
+                      <div className="admin-kpi-metric" style={{ fontSize: 24, paddingTop: 4 }}>
+                        Enforced
+                      </div>
+                      <div className="admin-kpi-sub">
+                        <span className="badge badge-success">Role: Admin</span>
+                        <span className="badge badge-info">Postgres RLS</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Two-Column Overview Snapshot */}
+                  <div className="admin-overview-grid">
+                    {/* Left Column: Recent Student Activity Feed */}
+                    <div className="admin-panel">
+                      <div className="admin-panel-head">
+                        <div>
+                          <div className="eyebrow"><span className="eyebrow-line" /> LIVE FEED</div>
+                          <h3>Recent Student Follow-up</h3>
+                        </div>
+                        <button
+                          className="text-link"
+                          type="button"
+                          onClick={() => setAdminSection("activity")}
+                        >
+                          View All ({opportunityActivities.length}) <ArrowRight size={14} />
+                        </button>
+                      </div>
+
+                      {activityLoading ? (
+                        <div className="admin-loading-state">
+                          <RefreshCw size={24} className="spin-icon" />
+                          <p>Loading activity feed…</p>
+                        </div>
+                      ) : opportunityActivities.length === 0 ? (
+                        <div className="admin-empty-panel">
+                          <Activity size={32} />
+                          <p>No student opportunity activity recorded yet.</p>
+                        </div>
+                      ) : (
+                        <div className="admin-activity-stream">
+                          {opportunityActivities.slice(0, 5).map((act) => (
+                            <div className="admin-stream-item" key={`${act.user_id}-${act.opportunity_id}`}>
+                              <div className="admin-student-avatar">
+                                {act.student_name.slice(0, 2).toUpperCase()}
+                              </div>
+                              <div className="admin-stream-copy">
+                                <div className="admin-stream-top">
+                                  <strong>{act.student_name}</strong>
+                                  <span className={`opportunity-activity-status ${act.status}`}>
+                                    {act.status === "applied" ? (
+                                      <>
+                                        <CheckCircle2 size={12} /> Applied / Registered
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Eye size={12} /> Visited
+                                      </>
+                                    )}
+                                  </span>
+                                </div>
+                                <p className="admin-stream-title">{act.title}</p>
+                                <div className="admin-stream-meta">
+                                  <span>{act.opportunity_kind}</span>
+                                  <span>•</span>
+                                  <span>{act.organization}</span>
+                                  {act.institution && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{act.institution}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right Column: Opportunities Snapshot */}
+                    <div className="admin-panel">
+                      <div className="admin-panel-head">
+                        <div>
+                          <div className="eyebrow"><span className="eyebrow-line" /> INVENTORY SNAPSHOT</div>
+                          <h3>Opportunities Status</h3>
+                        </div>
+                        <button
+                          className="text-link"
+                          type="button"
+                          onClick={() => setAdminSection("opportunities")}
+                        >
+                          Manage All ({opportunityRows.length}) <ArrowRight size={14} />
+                        </button>
+                      </div>
+
+                      {opportunityRowsLoading ? (
+                        <div className="admin-loading-state">
+                          <RefreshCw size={24} className="spin-icon" />
+                          <p>Loading opportunities…</p>
+                        </div>
+                      ) : opportunityRows.length === 0 ? (
+                        <div className="admin-empty-panel">
+                          <BriefcaseBusiness size={32} />
+                          <p>No opportunities posted yet.</p>
+                        </div>
+                      ) : (
+                        <div className="admin-stream-list">
+                          {opportunityRows.slice(0, 5).map((listing) => (
+                            <div className="admin-snapshot-card" key={listing.id}>
+                              <div className="admin-snapshot-info">
+                                <div className="admin-snapshot-tags">
+                                  <span className={`admin-kind-pill kind-${listing.kind.toLowerCase()}`}>
+                                    {listing.kind}
+                                  </span>
+                                  <span className={`admin-status-badge ${listing.isPublished ? "published" : "draft"}`}>
+                                    {listing.isPublished ? "Published" : "Draft"}
+                                  </span>
+                                </div>
+                                <h4>{listing.title}</h4>
+                                <p>{listing.organization} • {listing.city}</p>
+                              </div>
+                              <div className="admin-snapshot-actions">
+                                <button
+                                  className={`button button-small ${listing.isPublished ? "button-outline" : "button-dark"}`}
+                                  type="button"
+                                  onClick={() => void toggleOpportunityPublication(listing)}
+                                >
+                                  {listing.isPublished ? "Unpublish" : "Publish"}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {/* SECTION: ORDERS & MANUAL TRACKING CONSOLE */}
+              {adminSection === "orders" && (
+                <section className="admin-orders-view">
+                  {selectedAdminOrder ? (
+                    /* ORDER DETAIL & MANUAL TRACKING VIEW */
+                    <div className="printable-packing-slip" style={{ display: "grid", gap: "24px" }}>
+                      {/* Top Action Bar */}
+                      <div className="admin-order-detail-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            className="button button-outline button-small"
+                            onClick={() => setSelectedAdminOrder(null)}
+                          >
+                            <ArrowLeft size={14} /> Back to Orders
+                          </button>
+                          <h2 style={{ margin: 0, fontSize: "20px", color: "#0F1F3D", fontWeight: 800 }}>
+                            Order #{selectedAdminOrder.order_number || selectedAdminOrder.id}
+                          </h2>
+                          <span className={`tracking-badge stage-${selectedAdminOrder.tracking_status.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}>
+                            {selectedAdminOrder.tracking_status}
+                          </span>
+                          <span className={`badge ${selectedAdminOrder.payment_status === "PAID" ? "badge-success" : "badge-draft"}`}>
+                            {selectedAdminOrder.payment_status}
+                          </span>
+                          {isOrderOverdue(selectedAdminOrder) && (
+                            <span className="overdue-pill" role="alert" style={{ background: "#FEF2F2", color: "#DC2626", border: "1px solid #FCA5A5", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              <Clock3 size={13} /> Overdue for Delivery
+                            </span>
+                          )}
+                        </div>
+
+                        <div style={{ display: "flex", gap: "10px" }}>
+                          <button
+                            type="button"
+                            className="button button-outline button-small"
+                            onClick={() => copyAddressToClipboard(selectedAdminOrder)}
+                            title="Copy customer delivery address"
+                          >
+                            <Copy size={14} /> Copy Address
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-outline button-small"
+                            onClick={() => window.print()}
+                            title="Print packing slip and shipping label"
+                          >
+                            <Printer size={14} /> Print Packing Slip
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 3 Summary Info Cards */}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "18px" }}>
+                        {/* Customer Information */}
+                        <div style={{ background: "#FFFFFF", borderRadius: "14px", padding: "20px", border: "1px solid #E2E8F0" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", color: "#F97316" }}>
+                            <UserRound size={18} />
+                            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#0F1F3D" }}>Customer Details</h3>
+                          </div>
+                          <p style={{ margin: "0 0 6px", fontSize: "14px", fontWeight: 700, color: "#0F1F3D" }}>
+                            {selectedAdminOrder.customer_name}
+                          </p>
+                          <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#475569" }}>
+                            Email: <strong>{selectedAdminOrder.customer_email}</strong>
+                          </p>
+                          <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#475569" }}>
+                            Mobile: <strong>{selectedAdminOrder.customer_phone}</strong>
+                          </p>
+                          {selectedAdminOrder.customer?.college && (
+                            <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#475569" }}>
+                              College: <strong>{selectedAdminOrder.customer.college}</strong>
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Delivery Address */}
+                        <div style={{ background: "#FFFFFF", borderRadius: "14px", padding: "20px", border: "1px solid #E2E8F0" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", color: "#F97316" }}>
+                            <MapPin size={18} />
+                            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#0F1F3D" }}>Delivery Snapshot</h3>
+                          </div>
+                          <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#334155" }}>
+                            {selectedAdminOrder.shipping_address?.addressLine1}
+                          </p>
+                          {selectedAdminOrder.shipping_address?.addressLine2 && (
+                            <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#334155" }}>
+                              {selectedAdminOrder.shipping_address.addressLine2}
+                            </p>
+                          )}
+                          <p style={{ margin: 0, fontSize: "13px", color: "#0F1F3D", fontWeight: 600 }}>
+                            {selectedAdminOrder.shipping_address?.city}, {selectedAdminOrder.shipping_address?.state} - {selectedAdminOrder.shipping_address?.pincode}
+                          </p>
+                        </div>
+
+                        {/* Payment & Audit Info */}
+                        <div style={{ background: "#FFFFFF", borderRadius: "14px", padding: "20px", border: "1px solid #E2E8F0" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", color: "#F97316" }}>
+                            <CreditCard size={18} />
+                            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#0F1F3D" }}>Payment Verification</h3>
+                          </div>
+                          <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#475569" }}>
+                            Gateway: <strong>Cashfree Custom Web SDK</strong>
+                          </p>
+                          <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#475569" }}>
+                            Order ID: <code style={{ fontSize: "12px", background: "#F1F5F9", padding: "2px 6px", borderRadius: "4px" }}>{selectedAdminOrder.cashfree_order_id || selectedAdminOrder.id}</code>
+                          </p>
+                          <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#475569" }}>
+                            Method: <strong>{selectedAdminOrder.payment_method?.toUpperCase()}</strong>
+                          </p>
+                          <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#475569" }}>
+                            Total Amount: <strong style={{ color: "#F97316", fontSize: "14px" }}>{formatRupee(selectedAdminOrder.total_amount)}</strong>
+                          </p>
+                          {selectedAdminOrder.paid_at && (
+                            <p style={{ margin: 0, fontSize: "12px", color: "#64748B" }}>
+                              Paid at: {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(selectedAdminOrder.paid_at))}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Items Table */}
+                      <div style={{ background: "#FFFFFF", borderRadius: "14px", padding: "20px", border: "1px solid #E2E8F0" }}>
+                        <h3 style={{ margin: "0 0 16px", fontSize: "15px", fontWeight: 700, color: "#0F1F3D" }}>
+                          Ordered Engineering Hardware ({selectedAdminOrder.items.length})
+                        </h3>
+                        <div style={{ overflowX: "auto" }}>
+                          <table className="admin-orders-table" style={{ width: "100%", textAlign: "left", borderCollapse: "collapse" }}>
+                            <thead>
+                              <tr style={{ borderBottom: "2px solid #F1F5F9", fontSize: "12px", color: "#64748B", textTransform: "uppercase" }}>
+                                <th style={{ padding: "10px 12px" }}>Project Name</th>
+                                <th style={{ padding: "10px 12px" }}>Quantity</th>
+                                <th style={{ padding: "10px 12px" }}>Unit Price</th>
+                                <th style={{ padding: "10px 12px", textAlign: "right" }}>Subtotal</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedAdminOrder.items.map((it, idx) => (
+                                <tr key={idx} style={{ borderBottom: "1px solid #F1F5F9", fontSize: "13.5px" }}>
+                                  <td style={{ padding: "12px", fontWeight: 600, color: "#0F1F3D" }}>{it.title}</td>
+                                  <td style={{ padding: "12px" }}>{it.qty}</td>
+                                  <td style={{ padding: "12px" }}>{formatRupee(it.price)}</td>
+                                  <td style={{ padding: "12px", textAlign: "right", fontWeight: 700, color: "#0F1F3D" }}>
+                                    {formatRupee(it.price * it.qty)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Manual Tracking Control Panel */}
+                      <div style={{ background: "#FFFFFF", borderRadius: "16px", padding: "24px", border: "1.5px solid #FDBA74", boxShadow: "0 4px 16px rgba(249,115,22,0.06)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "20px" }}>
+                          <div>
+                            <div className="eyebrow"><span className="eyebrow-line" /> MANUAL DISPATCH &amp; TRACKING CONTROL</div>
+                            <h3 style={{ margin: "4px 0 0", fontSize: "18px", color: "#0F1F3D", fontWeight: 800 }}>
+                              Update Order Tracking Stage
+                            </h3>
+                          </div>
+                          <button
+                            type="button"
+                            className="button button-primary"
+                            onClick={moveToNextStage}
+                            disabled={stageUpdating || selectedAdminOrder.tracking_status === "Delivered" || selectedAdminOrder.tracking_status === "Cancelled"}
+                          >
+                            Move to Next Stage <ArrowRight size={15} />
+                          </button>
+                        </div>
+
+                        {/* Interactive Form Controls */}
+                        <div style={{ display: "grid", gap: "16px" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "16px" }}>
+                            <div>
+                              <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "#0F1F3D", marginBottom: "6px" }}>
+                                Target Stage
+                              </label>
+                              <select
+                                className="checkout-input-field"
+                                value={newStage}
+                                onChange={(e) => setNewStage(e.target.value as OrderTrackingStage)}
+                              >
+                                {(
+                                  [
+                                    "Order Placed",
+                                    "Confirmed",
+                                    "Building (Processing)",
+                                    "Testing / Quality Check",
+                                    "Packed",
+                                    "Shipped",
+                                    "Delivered",
+                                    "Cancelled",
+                                    "Refunded",
+                                  ] as OrderTrackingStage[]
+                                ).map((stg) => (
+                                  <option key={stg} value={stg}>
+                                    {stg}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "#0F1F3D", marginBottom: "6px" }}>
+                                Expected Delivery Date
+                              </label>
+                              <input
+                                type="date"
+                                className="checkout-input-field"
+                                value={expectedDateInput}
+                                onChange={(e) => setExpectedDateInput(e.target.value)}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Courier Fields (Shown when Shipped is selected) */}
+                          {(newStage === "Shipped" || selectedAdminOrder.tracking_status === "Shipped") && (
+                            <div style={{ background: "#F0FDF4", padding: "16px", borderRadius: "12px", border: "1px solid #BBF7D0", display: "grid", gap: "12px" }}>
+                              <h4 style={{ margin: 0, fontSize: "13.5px", color: "#166534", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px" }}>
+                                <Truck size={16} /> Courier Waybill Information (Required for Shipped stage)
+                              </h4>
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+                                <div>
+                                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#14532D", marginBottom: "4px" }}>
+                                    Courier Carrier *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g. DTDC, Blue Dart, Delhivery"
+                                    className="checkout-input-field"
+                                    value={courierNameInput}
+                                    onChange={(e) => setCourierNameInput(e.target.value)}
+                                    required
+                                  />
+                                </div>
+                                <div>
+                                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#14532D", marginBottom: "4px" }}>
+                                    Tracking / AWB Number *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g. D39485721"
+                                    className="checkout-input-field"
+                                    value={courierTrackingNumberInput}
+                                    onChange={(e) => setCourierTrackingNumberInput(e.target.value)}
+                                    required
+                                  />
+                                </div>
+                                <div>
+                                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#14532D", marginBottom: "4px" }}>
+                                    Tracking URL (Optional)
+                                  </label>
+                                  <input
+                                    type="url"
+                                    placeholder="https://track.carrier.com/..."
+                                    className="checkout-input-field"
+                                    value={courierTrackingUrlInput}
+                                    onChange={(e) => setCourierTrackingUrlInput(e.target.value)}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          <div>
+                            <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "#0F1F3D", marginBottom: "6px" }}>
+                              Public Stage Note (Visible on student's tracking page)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Circuit boards assembled and undergoing 24-hour sensor testing"
+                              className="checkout-input-field"
+                              value={stageNote}
+                              onChange={(e) => setStageNote(e.target.value)}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "#0F1F3D", marginBottom: "6px" }}>
+                              Internal Workshop Notes (Private to administrators)
+                            </label>
+                            <textarea
+                              rows={2}
+                              placeholder="e.g. Customer requested extra header pins soldered on GPIO port"
+                              className="checkout-input-field"
+                              style={{ height: "auto", padding: "10px 14px", fontFamily: "inherit" }}
+                              value={internalNotesInput}
+                              onChange={(e) => setInternalNotesInput(e.target.value)}
+                            />
+                          </div>
+
+                          <div style={{ textAlign: "right", marginTop: "8px" }}>
+                            <button
+                              type="button"
+                              className="button button-dark"
+                              disabled={stageUpdating}
+                              onClick={() => submitStageUpdate()}
+                            >
+                              {stageUpdating ? "Saving stage update…" : "Save Tracking Stage"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Status History Timeline Log */}
+                      <div style={{ background: "#FFFFFF", borderRadius: "14px", padding: "20px", border: "1px solid #E2E8F0" }}>
+                        <h3 style={{ margin: "0 0 16px", fontSize: "15px", fontWeight: 700, color: "#0F1F3D" }}>
+                          Audit History Timeline
+                        </h3>
+                        <div className="tracking-history-log">
+                          {(selectedAdminOrder.status_history || []).length === 0 ? (
+                            <p style={{ margin: 0, fontSize: "13px", color: "#64748B" }}>
+                              No stage transitions logged yet.
+                            </p>
+                          ) : (
+                            selectedAdminOrder.status_history?.map((entry, i) => (
+                              <div key={i} style={{ display: "flex", gap: "12px", padding: "10px 0", borderBottom: "1px solid #F1F5F9", fontSize: "13px" }}>
+                                <div style={{ color: "#F97316", marginTop: "2px" }}><CheckCircle2 size={16} /></div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
+                                    <strong style={{ color: "#0F1F3D" }}>
+                                      {entry.from_stage ? `${entry.from_stage} → ${entry.to_stage}` : entry.to_stage}
+                                    </strong>
+                                    <span style={{ fontSize: "12px", color: "#64748B" }}>
+                                      {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(entry.changed_at))}
+                                    </span>
+                                  </div>
+                                  <small style={{ color: "#64748B" }}>By: {entry.changed_by_name || entry.changed_by}</small>
+                                  {entry.note && (
+                                    <p style={{ margin: "4px 0 0", color: "#334155", fontStyle: "italic" }}>
+                                      "{entry.note}"
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Confirmation Modal for Delivered */}
+                      {confirmDeliveredDialogOpen && (
+                        <div className="modal-overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+                          <div className="modal-card" style={{ maxWidth: "460px", background: "#fff", padding: "24px", borderRadius: "16px" }}>
+                            <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#DCFCE7", color: "#16A34A", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "16px" }}>
+                              <CheckCircle2 size={24} />
+                            </div>
+                            <h3 style={{ margin: "0 0 8px", fontSize: "18px", color: "#0F1F3D", fontWeight: 700 }}>
+                              Confirm Order Delivery
+                            </h3>
+                            <p style={{ margin: "0 0 20px", fontSize: "13.5px", color: "#475569", lineHeight: 1.5 }}>
+                              Are you sure you want to mark this order as <strong>Delivered</strong>? This indicates the hardware kit has reached the student and will conclude the tracking sequence.
+                            </p>
+                            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                              <button
+                                type="button"
+                                className="button button-outline button-small"
+                                onClick={() => setConfirmDeliveredDialogOpen(false)}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="button button-primary button-small"
+                                onClick={() => submitStageUpdate("Delivered")}
+                              >
+                                Yes, Mark Delivered
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Confirmation Modal for Cancelled/Refunded */}
+                      {confirmCancelledDialogOpen && (
+                        <div className="modal-overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+                          <div className="modal-card" style={{ maxWidth: "460px", background: "#fff", padding: "24px", borderRadius: "16px" }}>
+                            <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#FEE2E2", color: "#DC2626", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "16px" }}>
+                              <AlertCircle size={24} />
+                            </div>
+                            <h3 style={{ margin: "0 0 8px", fontSize: "18px", color: "#0F1F3D", fontWeight: 700 }}>
+                              Modify Cancelled / Refunded Order?
+                            </h3>
+                            <p style={{ margin: "0 0 20px", fontSize: "13.5px", color: "#475569", lineHeight: 1.5 }}>
+                              This order is currently marked as Cancelled or Refunded. Are you sure you want to overwrite its tracking status?
+                            </p>
+                            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                              <button
+                                type="button"
+                                className="button button-outline button-small"
+                                onClick={() => setConfirmCancelledDialogOpen(false)}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="button button-primary button-small"
+                                onClick={() => submitStageUpdate(newStage)}
+                              >
+                                Confirm Update
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* ORDERS LIST VIEW */
+                    <div style={{ display: "grid", gap: "24px" }}>
+                      {/* Section Header */}
+                      <div className="admin-section-header">
+                        <div>
+                          <div className="eyebrow"><span className="eyebrow-line" /> WORKSHOP PRODUCTION QUEUE</div>
+                          <h2>Hardware Orders &amp; Manual Tracking</h2>
+                          <p className="admin-section-desc">
+                            Ready-made designs are built to order. Manage customer shipments, update stages, and set courier tracking details.
+                          </p>
+                        </div>
+                        <div className="admin-header-actions" style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            type="button"
+                            className="button button-outline"
+                            onClick={() => {
+                              setOrdersRevision((r) => r + 1);
+                              showToast("Refreshing orders...", "info");
+                            }}
+                            title="Refresh orders list"
+                          >
+                            <RefreshCw size={15} /> Refresh
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-outline"
+                            onClick={exportOrdersCsv}
+                            title="Export filtered orders as CSV"
+                          >
+                            <Download size={15} /> Export CSV
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 4 Summary Cards */}
+                      <div className="admin-kpi-grid">
+                        <div className="admin-kpi-card" onClick={() => setOrderFilterTab("new")} role="button" tabIndex={0}>
+                          <div className="admin-kpi-header">
+                            <span className="admin-kpi-title">NEW ORDERS</span>
+                            <div className="admin-kpi-icon icon-cyan"><Clock3 size={18} /></div>
+                          </div>
+                          <div className="admin-kpi-metric">{newOrdersCount}</div>
+                          <div className="admin-kpi-sub"><span className="badge badge-draft">Awaiting Build</span></div>
+                        </div>
+
+                        <div className="admin-kpi-card" onClick={() => setOrderFilterTab("building")} role="button" tabIndex={0}>
+                          <div className="admin-kpi-header">
+                            <span className="admin-kpi-title">IN BUILD</span>
+                            <div className="admin-kpi-icon" style={{ background: "#FEF3C7", color: "#B45309" }}><Cpu size={18} /></div>
+                          </div>
+                          <div className="admin-kpi-metric">{inBuildOrdersCount}</div>
+                          <div className="admin-kpi-sub"><span className="badge" style={{ background: "#FEF3C7", color: "#B45309" }}>Assembly &amp; Testing</span></div>
+                        </div>
+
+                        <div className="admin-kpi-card" onClick={() => setOrderFilterTab("shipped")} role="button" tabIndex={0}>
+                          <div className="admin-kpi-header">
+                            <span className="admin-kpi-title">SHIPPED</span>
+                            <div className="admin-kpi-icon icon-violet"><Truck size={18} /></div>
+                          </div>
+                          <div className="admin-kpi-metric">{shippedOrdersCount}</div>
+                          <div className="admin-kpi-sub"><span className="badge badge-info">In Transit</span></div>
+                        </div>
+
+                        <div className="admin-kpi-card" onClick={() => setOrderFilterTab("delivered")} role="button" tabIndex={0}>
+                          <div className="admin-kpi-header">
+                            <span className="admin-kpi-title">DELIVERED</span>
+                            <div className="admin-kpi-icon icon-emerald"><CheckCircle2 size={18} /></div>
+                          </div>
+                          <div className="admin-kpi-metric">{deliveredOrdersCount}</div>
+                          <div className="admin-kpi-sub"><span className="badge badge-success">Fulfilled</span></div>
+                        </div>
+                      </div>
+
+                      {/* Filter Tabs */}
+                      <div className="opportunity-filter-tabs" role="tablist" style={{ overflowX: "auto", whiteSpace: "nowrap" }}>
+                        <button
+                          type="button"
+                          className={`filter-chip ${orderFilterTab === "all" ? "active" : ""}`}
+                          onClick={() => setOrderFilterTab("all")}
+                        >
+                          All Orders ({adminOrders.length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`filter-chip ${orderFilterTab === "paid" ? "active" : ""}`}
+                          onClick={() => setOrderFilterTab("paid")}
+                        >
+                          All Paid ({adminOrders.filter((o) => o.payment_status === "PAID").length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`filter-chip ${orderFilterTab === "new" ? "active" : ""}`}
+                          onClick={() => setOrderFilterTab("new")}
+                        >
+                          New ({newOrdersCount})
+                        </button>
+                        <button
+                          type="button"
+                          className={`filter-chip ${orderFilterTab === "building" ? "active" : ""}`}
+                          onClick={() => setOrderFilterTab("building")}
+                        >
+                          Building ({inBuildOrdersCount})
+                        </button>
+                        <button
+                          type="button"
+                          className={`filter-chip ${orderFilterTab === "shipped" ? "active" : ""}`}
+                          onClick={() => setOrderFilterTab("shipped")}
+                        >
+                          Shipped ({shippedOrdersCount})
+                        </button>
+                        <button
+                          type="button"
+                          className={`filter-chip ${orderFilterTab === "delivered" ? "active" : ""}`}
+                          onClick={() => setOrderFilterTab("delivered")}
+                        >
+                          Delivered ({deliveredOrdersCount})
+                        </button>
+                        <button
+                          type="button"
+                          className={`filter-chip ${orderFilterTab === "cancelled" ? "active" : ""}`}
+                          onClick={() => setOrderFilterTab("cancelled")}
+                        >
+                          Cancelled / Refunded ({adminOrders.filter((o) => o.tracking_status === "Cancelled" || o.tracking_status === "Refunded").length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`filter-chip ${orderFilterTab === "issues" ? "active" : ""}`}
+                          onClick={() => setOrderFilterTab("issues")}
+                        >
+                          Payment Issues ({adminOrders.filter((o) => o.payment_status === "PENDING" || o.payment_status === "FAILED").length})
+                        </button>
+                      </div>
+
+                      {/* Toolbar: Search and Date Range */}
+                      <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}>
+                        <div style={{ flex: 1, minWidth: "260px" }}>
+                          <input
+                            type="search"
+                            className="checkout-input-field"
+                            placeholder="Search by Order ID, student name, email, phone, project..."
+                            value={orderSearch}
+                            onChange={(e) => setOrderSearch(e.target.value)}
+                          />
+                        </div>
+                        <div style={{ width: "160px" }}>
+                          <select
+                            className="checkout-input-field"
+                            value={orderDateRange}
+                            onChange={(e) => setOrderDateRange(e.target.value as any)}
+                          >
+                            <option value="all">All Dates</option>
+                            <option value="today">Today</option>
+                            <option value="week">Last 7 Days</option>
+                            <option value="month">Last 30 Days</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Orders Table */}
+                      <div style={{ background: "#FFFFFF", borderRadius: "16px", border: "1px solid #E2E8F0", overflow: "hidden" }}>
+                        {ordersLoading ? (
+                          <div style={{ padding: "40px", textAlign: "center", color: "#64748B" }}>
+                            Loading workshop orders…
+                          </div>
+                        ) : filteredOrders.length === 0 ? (
+                          <div style={{ padding: "48px 24px", textAlign: "center" }}>
+                            <PackageCheck size={36} color="#94A3B8" style={{ margin: "0 auto 12px" }} />
+                            <h3 style={{ margin: "0 0 6px", fontSize: "16px", color: "#0F1F3D" }}>No orders matching criteria</h3>
+                            <p style={{ margin: 0, fontSize: "13.5px", color: "#64748B" }}>
+                              {orderSearch ? "Try adjusting your search query or filter tab." : "No orders have been recorded in this category yet."}
+                            </p>
+                          </div>
+                        ) : (
+                          <div style={{ overflowX: "auto" }}>
+                            <table className="admin-orders-table" style={{ width: "100%", textAlign: "left", borderCollapse: "collapse" }}>
+                              <thead>
+                                <tr style={{ background: "#F8FAFC", borderBottom: "1.5px solid #E2E8F0", fontSize: "12px", color: "#64748B", textTransform: "uppercase" }}>
+                                  <th style={{ padding: "12px 16px" }}>Order ID</th>
+                                  <th style={{ padding: "12px 16px" }}>Student</th>
+                                  <th style={{ padding: "12px 16px" }}>Project(s)</th>
+                                  <th style={{ padding: "12px 16px" }}>Qty</th>
+                                  <th style={{ padding: "12px 16px" }}>Amount</th>
+                                  <th style={{ padding: "12px 16px" }}>Payment</th>
+                                  <th style={{ padding: "12px 16px" }}>Order Date</th>
+                                  <th style={{ padding: "12px 16px" }}>Tracking Stage</th>
+                                  <th style={{ padding: "12px 16px" }}>Expected Delivery</th>
+                                  <th style={{ padding: "12px 16px", textAlign: "right" }}>Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {filteredOrders.map((ord) => {
+                                  const overdue = isOrderOverdue(ord);
+                                  return (
+                                    <tr key={ord.id} style={{ borderBottom: "1px solid #F1F5F9", fontSize: "13px" }}>
+                                      <td style={{ padding: "12px 16px", fontWeight: 700, color: "#0F1F3D" }}>
+                                        #{ord.order_number || ord.id}
+                                      </td>
+                                      <td style={{ padding: "12px 16px" }}>
+                                        <strong style={{ color: "#0F1F3D", display: "block" }}>{ord.customer_name}</strong>
+                                        <small style={{ color: "#64748B" }}>{ord.customer_phone}</small>
+                                      </td>
+                                      <td style={{ padding: "12px 16px", maxWidth: "220px" }}>
+                                        <span style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                                          {ord.items.map((it) => it.title).join(", ")}
+                                        </span>
+                                      </td>
+                                      <td style={{ padding: "12px 16px" }}>
+                                        {ord.items.reduce((acc, it) => acc + (it.qty || 1), 0)}
+                                      </td>
+                                      <td style={{ padding: "12px 16px", fontWeight: 700, color: "#0F1F3D" }}>
+                                        {formatRupee(ord.total_amount)}
+                                      </td>
+                                      <td style={{ padding: "12px 16px" }}>
+                                        <span className={`badge ${ord.payment_status === "PAID" ? "badge-success" : "badge-draft"}`}>
+                                          {ord.payment_status}
+                                        </span>
+                                      </td>
+                                      <td style={{ padding: "12px 16px", color: "#64748B" }}>
+                                        {new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(new Date(ord.created_at))}
+                                      </td>
+                                      <td style={{ padding: "12px 16px" }}>
+                                        <span className={`tracking-badge stage-${ord.tracking_status.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}>
+                                          {ord.tracking_status}
+                                        </span>
+                                      </td>
+                                      <td style={{ padding: "12px 16px" }}>
+                                        <div>
+                                          <span>
+                                            {ord.expected_delivery_date ? new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(new Date(ord.expected_delivery_date)) : "~7 days"}
+                                          </span>
+                                          {overdue && (
+                                            <div style={{ marginTop: "4px" }}>
+                                              <span className="overdue-pill" style={{ background: "#FEF2F2", color: "#DC2626", fontSize: "11px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px" }}>
+                                                Overdue
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                                        <button
+                                          type="button"
+                                          className="button button-outline button-small"
+                                          onClick={() => openOrderDetail(ord)}
+                                        >
+                                          Manage <ArrowRight size={13} />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </section>
-              </section>
-            )}
-            {adminSection === "publish" && (
-              <section className="admin-publish-section">
-                <p className="admin-help">Publish official source-linked opportunities or manage the sourced component catalog.</p>
-                <div className="admin-workspace">
-                  <div className="admin-workspace-head"><div><span className="eyebrow"><span className="eyebrow-line" /> CONTENT MANAGEMENT</span><h2>Publish new content.</h2></div></div>
-                  <p className="admin-help">Only database-authorized admins can publish listings. Verify every opportunity with its official source.</p>
-                  <form className="admin-form admin-form-grid" onSubmit={publish}>
-              <label>Listing type<select value={kind} onChange={(event) => { setKind(event.target.value as Listing["kind"]); setMessage(""); }}>{listingKinds.map((name) => <option key={name}>{name}</option>)}</select></label>
-              {kind === "Products" ? (
-                <>
-                  <label className="admin-full">Edit existing component (or select “Add new component”)<select value={editingProductId} onChange={(event) => editComponent(event.target.value)}><option value="">Add new component</option>{productRows.map((product) => <option value={product.id} key={product.id}>{product.title} · {product.componentDetails?.mpn}</option>)}</select></label>
-                  <label>Component name<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-                  <label>Manufacturer<input required value={organization} onChange={(event) => setOrganization(event.target.value)} /></label>
-                  <label>Manufacturer part number<input required value={mpn} onChange={(event) => setMpn(event.target.value)} /></label>
-                  <label>Category<input value={componentCategory} onChange={(event) => setComponentCategory(event.target.value)} /></label>
-                  <label className="admin-full">Description<textarea required rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} /></label>
-                  <label className="admin-full">Component image URL (https)<input type="url" value={componentImageUrl} onChange={(event) => setComponentImageUrl(event.target.value)} placeholder="https://" /></label>
-                  <div className="component-admin-offers admin-full">{renderOfferEditor(0)}{renderOfferEditor(1)}</div>
-                  <button className="button button-dark admin-full" type="submit">{editingProductId ? "Update component and offers" : "Publish component comparison"} <ArrowRight size={15} /></button>
-                </>
-              ) : ["Internships", "Training", "Hackathons"].includes(kind) ? (
-                <>
-                  <label>Title<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-                  <label>Provider / organization<input required value={organization} onChange={(event) => setOrganization(event.target.value)} /></label>
-                  <label>Location<input required value={city} onChange={(event) => setCity(event.target.value)} /></label>
-                  <label className="admin-full">Opportunity details<textarea required rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} /></label>
-                  <label className="admin-full">Source or official application URL<input type="url" required value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://" /></label>
-                  <button className="button button-dark admin-full" type="submit">Publish opportunity <ArrowRight size={15} /></button>
-                </>
-              ) : (
-                <>
-                  <label>Title<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-                  <label>Provider / organization<input required value={organization} onChange={(event) => setOrganization(event.target.value)} /></label>
-                  <label>Location<input required value={city} onChange={(event) => setCity(event.target.value)} /></label>
-                  <label className="admin-full">Summary<textarea required rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} /></label>
-                  <label className="admin-full">Source or official URL<input type="url" required value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://" /></label>
-                  <button className="button button-dark admin-full" type="submit">Save unpublished draft <ArrowRight size={15} /></button>
-                </>
               )}
-            </form>
-            {message && <p className="admin-message" role="status">{message}</p>}
-            <section className="admin-subsection" aria-labelledby="admin-opportunities-heading">
-              <div className="admin-subsection-head">
-                <div><span className="eyebrow"><span className="eyebrow-line" /> OPPORTUNITY CONTROL</span><h3 id="admin-opportunities-heading">Published and draft opportunities</h3></div>
-                <button className="button button-outline button-small" type="button" onClick={() => setOpportunityRowsRefreshRevision((revision) => revision + 1)}>Refresh</button>
-              </div>
-              {opportunityRowsError && <p className="admin-message" role="alert">{opportunityRowsError}</p>}
-              {opportunityRowsLoading ? <p className="admin-help">Loading opportunity listings…</p> : opportunityRows.length === 0 ? (
-                <p className="admin-help">No opportunity listings have been added yet.</p>
-              ) : (
-                <div className="admin-record-list">
-                  {opportunityRows.map((listing) => (
-                    <article className="admin-record" key={listing.id}>
-                      <div className="admin-record-copy">
-                        <span className="opportunity-activity-kind">{listing.kind} · {listing.isPublished ? "Published" : "Draft"}</span>
-                        <h4>{listing.title}</h4>
-                        <p>{listing.organization} · {listing.city}</p>
-                        <a href={listing.sourceUrl} target="_blank" rel="noreferrer">Open source <ArrowUpRight size={13} /></a>
-                      </div>
-                      <button className="button button-outline button-small" type="button" onClick={() => void toggleOpportunityPublication(listing)}>
-                        {listing.isPublished ? "Unpublish" : "Publish"}
+
+              {/* SECTION: OPPORTUNITIES MANAGER */}
+              {adminSection === "opportunities" && (
+                <section className="admin-opportunities-view">
+                  <div className="admin-section-header">
+                    <div>
+                      <div className="eyebrow"><span className="eyebrow-line" /> OPPORTUNITY CONTROL</div>
+                      <h2>Student Opportunities</h2>
+                      <p className="admin-section-desc">
+                        Publish and verify student internships, corporate training programs, and hackathons.
+                      </p>
+                    </div>
+                    <div className="admin-header-actions">
+                      <button
+                        className="button button-primary"
+                        type="button"
+                        onClick={() => {
+                          if (oppFormOpen && !editingOppId) {
+                            setOppFormOpen(false);
+                          } else {
+                            startCreateOpportunity();
+                          }
+                        }}
+                      >
+                        {oppFormOpen && !editingOppId ? (
+                          <>
+                            <X size={16} /> Close Form
+                          </>
+                        ) : (
+                          <>
+                            <Plus size={16} /> Post Opportunity
+                          </>
+                        )}
                       </button>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </section>
-                </div>
-              </section>
-            )}
-            {adminSection === "activity" && (
-              <section className="admin-activity-section" aria-labelledby="admin-activity-heading">
-            <section className="admin-subsection" aria-labelledby="admin-activity-heading">
-              <div className="admin-subsection-head">
-                <div><span className="eyebrow"><span className="eyebrow-line" /> STUDENT FOLLOW-UP</span><h3 id="admin-activity-heading">Opportunity activity</h3></div>
-                <button className="button button-outline button-small" type="button" onClick={() => setActivityRefreshRevision((revision) => revision + 1)}>Refresh activity</button>
-              </div>
-              <p className="admin-help">Student-reported visits and applications/registrations. Application status is self-reported and is not confirmed by the provider.</p>
-              {activityError && <p className="admin-message" role="alert">{activityError}</p>}
-              {activityLoading ? <p className="admin-help">Loading student activity…</p> : opportunityActivities.length === 0 ? (
-                <p className="admin-help">No student opportunity activity has been recorded yet.</p>
-              ) : (
-                <div className="admin-record-list">
-                  {opportunityActivities.map((activity) => (
-                    <article className="admin-record admin-activity-record" key={`${activity.user_id}-${activity.opportunity_id}`}>
-                      <div className="admin-record-copy">
-                        <span className={`opportunity-activity-status ${activity.status}`}>{activity.status === "applied" ? "Student marked applied / registered" : "Student visited"}</span>
-                        <h4>{activity.title}</h4>
-                        <p>{activity.opportunity_kind} · {activity.organization} · {activity.city}</p>
-                        <p><strong>{activity.student_name}</strong>{activity.institution ? ` · ${activity.institution}` : ""}{activity.course ? ` · ${activity.course}` : ""}{activity.academic_year ? ` · ${activity.academic_year}` : ""}</p>
-                        <small>{activity.status === "applied" && activity.applied_at ? "Applied / registered" : "Last visited"} {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(activity.status === "applied" && activity.applied_at ? activity.applied_at : activity.visited_at))}</small>
+                    </div>
+                  </div>
+
+                  {opportunityRowsError && (
+                    <div className="admin-alert-banner" role="alert" style={{ marginBottom: 16 }}>
+                      <AlertCircle size={18} />
+                      <span>{opportunityRowsError}</span>
+                    </div>
+                  )}
+
+                  {/* Collapsible / Modal Create & Edit Form */}
+                  {oppFormOpen && (
+                    <div className="admin-form-panel">
+                      <div className="admin-form-panel-head">
+                        <div>
+                          <span className="eyebrow"><span className="eyebrow-line" /> {editingOppId ? "UPDATE LISTING" : "NEW OPPORTUNITY"}</span>
+                          <h3>{editingOppId ? "Edit Opportunity" : "Publish New Opportunity"}</h3>
+                        </div>
+                        <button
+                          className="admin-form-close-btn"
+                          type="button"
+                          onClick={() => setOppFormOpen(false)}
+                          aria-label="Close form"
+                        >
+                          <X size={18} />
+                        </button>
                       </div>
-                      <a className="button button-outline button-small" href={activity.opportunity_url} target="_blank" rel="noreferrer">Open listing <ArrowUpRight size={13} /></a>
-                    </article>
-                  ))}
-                </div>
+
+                      <form onSubmit={saveOpportunity} className="admin-form-grid">
+                        <div className="admin-field-full">
+                          <label>Opportunity Type</label>
+                          <div className="admin-kind-selector">
+                            {(["Internships", "Training", "Hackathons"] as const).map((k) => (
+                              <button
+                                key={k}
+                                type="button"
+                                className={`admin-kind-choice ${oppKind === k ? "active" : ""}`}
+                                onClick={() => setOppKind(k)}
+                              >
+                                {k === "Internships" && <BriefcaseBusiness size={16} />}
+                                {k === "Training" && <GraduationCap size={16} />}
+                                {k === "Hackathons" && <Code2 size={16} />}
+                                <span>{k}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Title / Position Name</label>
+                          <input
+                            required
+                            placeholder="e.g. Embedded Systems Engineering Intern"
+                            value={oppTitle}
+                            onChange={(e) => setOppTitle(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Provider / Organization</label>
+                          <input
+                            required
+                            placeholder="e.g. Texas Instruments / Bosch"
+                            value={oppOrg}
+                            onChange={(e) => setOppOrg(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Location / Mode</label>
+                          <input
+                            required
+                            placeholder="e.g. Bangalore, Karnataka (or Remote)"
+                            value={oppCity}
+                            onChange={(e) => setOppCity(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Official Application / Source URL (https)</label>
+                          <input
+                            required
+                            type="url"
+                            placeholder="https://careers.example.com/apply"
+                            value={oppUrl}
+                            onChange={(e) => setOppUrl(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field-full">
+                          <label>Description & Requirements</label>
+                          <textarea
+                            required
+                            rows={3}
+                            placeholder="Key responsibilities, eligibility requirements, stipend, duration..."
+                            value={oppSummary}
+                            onChange={(e) => setOppSummary(e.target.value)}
+                          />
+                        </div>
+
+                        {/* Live Preview Card */}
+                        <div className="admin-field-full admin-live-preview-box">
+                          <span className="admin-preview-label">Live Preview (How students see this)</span>
+                          <div className="admin-opportunity-preview-card">
+                            <div className="admin-preview-card-top">
+                              <span className={`admin-kind-pill kind-${oppKind.toLowerCase()}`}>{oppKind}</span>
+                              <span className="admin-preview-location">{oppCity || "Location"}</span>
+                            </div>
+                            <h4>{oppTitle || "Opportunity Title"}</h4>
+                            <p className="admin-preview-org">{oppOrg || "Organization Name"}</p>
+                            <p className="admin-preview-summary">{oppSummary || "Description will appear here..."}</p>
+                            <div className="admin-preview-footer">
+                              <span className="button button-dark button-small" style={{ pointerEvents: "none" }}>
+                                Apply on Official Site <ArrowUpRight size={13} />
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="admin-form-actions admin-field-full">
+                          <button
+                            type="button"
+                            className="button button-outline"
+                            onClick={() => setOppFormOpen(false)}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="button button-dark"
+                            disabled={oppSaving}
+                          >
+                            {oppSaving ? (
+                              <>
+                                <RefreshCw size={15} className="spin-icon" /> Saving…
+                              </>
+                            ) : (
+                              <>
+                                <Check size={16} /> {editingOppId ? "Update Opportunity" : "Publish Opportunity"}
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+
+                  {/* Filter & Search Bar */}
+                  <div className="admin-filter-bar">
+                    <div className="admin-search-wrapper">
+                      <Search size={16} className="admin-search-icon" />
+                      <input
+                        type="text"
+                        placeholder="Search by title, organization, or location…"
+                        value={oppSearch}
+                        onChange={(e) => setOppSearch(e.target.value)}
+                      />
+                      {oppSearch && (
+                        <button
+                          type="button"
+                          className="admin-clear-search"
+                          onClick={() => setOppSearch("")}
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="admin-filter-group">
+                      <div className="admin-tab-group">
+                        {(["all", "Internships", "Training", "Hackathons"] as const).map((k) => (
+                          <button
+                            key={k}
+                            type="button"
+                            className={`admin-filter-tab ${oppKindFilter === k ? "active" : ""}`}
+                            onClick={() => setOppKindFilter(k)}
+                          >
+                            {k === "all" ? "All Kinds" : k}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="admin-tab-group">
+                        {[
+                          { id: "all", label: "All Status" },
+                          { id: "published", label: "Published" },
+                          { id: "draft", label: "Drafts" },
+                        ].map(({ id, label }) => (
+                          <button
+                            key={id}
+                            type="button"
+                            className={`admin-filter-tab ${oppStatusFilter === id ? "active" : ""}`}
+                            onClick={() => setOppStatusFilter(id as typeof oppStatusFilter)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Opportunities Data Grid */}
+                  {opportunityRowsLoading ? (
+                    <div className="admin-loading-state">
+                      <RefreshCw size={28} className="spin-icon" />
+                      <p>Loading opportunities…</p>
+                    </div>
+                  ) : filteredOpportunities.length === 0 ? (
+                    <div className="admin-empty-state">
+                      <BriefcaseBusiness size={40} />
+                      <h3>No opportunities match your filter</h3>
+                      <p>Try resetting the search terms or add a new opportunity.</p>
+                      <button className="button button-outline button-small" onClick={startCreateOpportunity}>
+                        <Plus size={14} /> Post Opportunity
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="admin-cards-grid">
+                      {filteredOpportunities.map((opp) => (
+                        <article className="admin-opportunity-card" key={opp.id}>
+                          <div className="admin-card-header">
+                            <span className={`admin-kind-pill kind-${opp.kind.toLowerCase()}`}>
+                              {opp.kind}
+                            </span>
+                            <span className={`admin-status-badge ${opp.isPublished ? "published" : "draft"}`}>
+                              {opp.isPublished ? (
+                                <>
+                                  <CheckCircle2 size={12} /> Published
+                                </>
+                              ) : (
+                                <>
+                                  <Clock3 size={12} /> Draft
+                                </>
+                              )}
+                            </span>
+                          </div>
+
+                          <div className="admin-card-body">
+                            <h4>{opp.title}</h4>
+                            <div className="admin-card-org">
+                              <Building2 size={14} />
+                              <span>{opp.organization}</span>
+                            </div>
+                            <div className="admin-card-loc">
+                              <MapPin size={14} />
+                              <span>{opp.city}</span>
+                            </div>
+                            <p className="admin-card-summary">{opp.summary}</p>
+                          </div>
+
+                          <div className="admin-card-footer">
+                            <div className="admin-footer-actions">
+                              <button
+                                className={`button button-small ${opp.isPublished ? "button-outline" : "button-dark"}`}
+                                type="button"
+                                onClick={() => void toggleOpportunityPublication(opp)}
+                              >
+                                {opp.isPublished ? "Unpublish" : "Publish"}
+                              </button>
+                              <button
+                                className="button button-outline button-small"
+                                type="button"
+                                onClick={() => startEditOpportunity(opp)}
+                                title="Edit opportunity"
+                              >
+                                <Edit size={14} /> Edit
+                              </button>
+                              <a
+                                className="button button-outline button-small"
+                                href={opp.sourceUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Open source application link"
+                              >
+                                <ExternalLink size={13} />
+                              </a>
+                              <button
+                                className="button button-danger-ghost button-small"
+                                type="button"
+                                onClick={() => void deleteOpportunity(opp)}
+                                title="Delete listing"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
               )}
-            </section>
-              </section>
-            )}
-            {adminSection === "profile" && (
-              <section className="admin-profile-page">
-                <div className="admin-profile-card">
-                  <span className="admin-profile-large-avatar"><UserRound size={28} /></span>
-                  <span className="eyebrow"><span className="eyebrow-line" /> ADMIN ACCOUNT</span>
-                  <h2>Administrator profile</h2>
-                  <p>Signed in with your Supabase account.</p>
-                  <dl className="admin-profile-details">
-                    <div><dt>Email</dt><dd>{adminEmail || "Email unavailable"}</dd></div>
-                    <div><dt>Access role</dt><dd><span className="admin-role-badge"><ShieldCheck size={14} /> Administrator</span></dd></div>
-                    <div><dt>Authentication</dt><dd>Email and password managed by Supabase</dd></div>
-                  </dl>
-                  <p className="admin-security-note"><ShieldCheck size={16} /> Your admin permissions are checked against the database. Never share your password or add it to the website source.</p>
-                  <button className="button button-outline" type="button" onClick={() => void signOut()}><LogOut size={15} /> Log out</button>
-                </div>
-              </section>
-            )}
-            {adminSection !== "publish" && message && <p className="admin-message" role="status">{message}</p>}
-            <p className="admin-security-note"><ShieldCheck size={16} /> Admin access and student activity visibility are enforced by database row-level security.</p>
-              </div>
-            </section>
-          </div>
-        )}
+
+              {/* SECTION: COMPONENT CATALOG */}
+              {adminSection === "components" && (
+                <section className="admin-components-view">
+                  <div className="admin-section-header">
+                    <div>
+                      <div className="eyebrow"><span className="eyebrow-line" /> HARDWARE CATALOG</div>
+                      <h2>Components & Multi-Seller Intelligence</h2>
+                      <p className="admin-section-desc">
+                        Manage electronic parts, manufacturer specs, and dual-retailer price comparisons.
+                      </p>
+                    </div>
+                    <div className="admin-header-actions">
+                      <button
+                        className="button button-primary"
+                        type="button"
+                        onClick={() => {
+                          if (compFormOpen && !editingProductId) {
+                            setCompFormOpen(false);
+                          } else {
+                            startCreateComponent();
+                          }
+                        }}
+                      >
+                        {compFormOpen && !editingProductId ? (
+                          <>
+                            <X size={16} /> Close Form
+                          </>
+                        ) : (
+                          <>
+                            <Plus size={16} /> Add Component
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {productRowsError && (
+                    <div className="admin-alert-banner" role="alert" style={{ marginBottom: 16 }}>
+                      <AlertCircle size={18} />
+                      <span>{productRowsError}</span>
+                    </div>
+                  )}
+
+                  {/* Component Form */}
+                  {compFormOpen && (
+                    <div className="admin-form-panel">
+                      <div className="admin-form-panel-head">
+                        <div>
+                          <span className="eyebrow"><span className="eyebrow-line" /> {editingProductId ? "UPDATE COMPONENT" : "NEW CATALOG ENTRY"}</span>
+                          <h3>{editingProductId ? "Edit Component & Offers" : "Add Electronic Component"}</h3>
+                        </div>
+                        <button
+                          className="admin-form-close-btn"
+                          type="button"
+                          onClick={() => setCompFormOpen(false)}
+                          aria-label="Close form"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+
+                      <form onSubmit={saveComponent} className="admin-form-grid">
+                        <div className="admin-field">
+                          <label>Component Title</label>
+                          <input
+                            required
+                            placeholder="e.g. 5V Voltage Regulator (LM7805)"
+                            value={compTitle}
+                            onChange={(e) => setCompTitle(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Manufacturer</label>
+                          <input
+                            required
+                            placeholder="e.g. Texas Instruments / STMicroelectronics"
+                            value={compOrg}
+                            onChange={(e) => setCompOrg(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Manufacturer Part Number (MPN)</label>
+                          <input
+                            required
+                            placeholder="e.g. LM7805CV"
+                            value={compMpn}
+                            onChange={(e) => setCompMpn(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Category</label>
+                          <input
+                            placeholder="e.g. Linear Regulators, Microcontrollers, Op-Amps"
+                            value={compCategory}
+                            onChange={(e) => setCompCategory(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field-full">
+                          <label>Component Description & Specifications</label>
+                          <textarea
+                            required
+                            rows={3}
+                            placeholder="Brief technical description, key package, voltage/current specs..."
+                            value={compSummary}
+                            onChange={(e) => setCompSummary(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field-full">
+                          <label>Component Image URL (https)</label>
+                          <div className="admin-image-input-group">
+                            <input
+                              type="url"
+                              placeholder="https://images.example.com/lm7805.jpg"
+                              value={compImageUrl}
+                              onChange={(e) => setCompImageUrl(e.target.value)}
+                            />
+                            {compImageUrl && (
+                              <div className="admin-image-preview-thumb">
+                                <img
+                                  src={compImageUrl}
+                                  alt="Preview"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = "none";
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Dual Retailer Offers Grid */}
+                        <div className="admin-field-full">
+                          <div className="admin-offers-heading">
+                            <h4>Retailer Pricing & Availability Comparison (Up to 2 Sellers)</h4>
+                            <p>Enter official verified retailer pricing for student comparison.</p>
+                          </div>
+
+                          <div className="component-admin-offers">
+                            {[0, 1].map((idx) => {
+                              const offer = offerDrafts[idx];
+                              return (
+                                <fieldset className="component-admin-offer" key={idx}>
+                                  <legend>
+                                    Seller Offer {idx + 1} {idx === 0 ? "(Primary)" : "(Secondary)"}
+                                  </legend>
+                                  <div className="admin-field">
+                                    <label>Retailer Name</label>
+                                    <input
+                                      required={idx === 0}
+                                      value={offer.seller}
+                                      onChange={(e) => updateOfferDraft(idx, "seller", e.target.value)}
+                                      placeholder={idx === 0 ? "DigiKey" : "Mouser Electronics"}
+                                    />
+                                  </div>
+                                  <div className="admin-field">
+                                    <label>Price per unit</label>
+                                    <input
+                                      required={idx === 0}
+                                      type="number"
+                                      min="0.0001"
+                                      step="any"
+                                      placeholder="0.45"
+                                      value={offer.price}
+                                      onChange={(e) => updateOfferDraft(idx, "price", e.target.value)}
+                                    />
+                                  </div>
+                                  <div className="admin-field">
+                                    <label>Currency Code (3 letters)</label>
+                                    <input
+                                      required={idx === 0}
+                                      maxLength={3}
+                                      placeholder="USD"
+                                      value={offer.currency}
+                                      onChange={(e) => updateOfferDraft(idx, "currency", e.target.value)}
+                                    />
+                                  </div>
+                                  <div className="admin-field">
+                                    <label>Price Quantity Break</label>
+                                    <input
+                                      required={idx === 0}
+                                      type="number"
+                                      min="1"
+                                      step="1"
+                                      placeholder="1"
+                                      value={offer.quantity}
+                                      onChange={(e) => updateOfferDraft(idx, "quantity", e.target.value)}
+                                    />
+                                  </div>
+                                  <div className="admin-field">
+                                    <label>In Stock Count (optional)</label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      placeholder="1250"
+                                      value={offer.stock}
+                                      onChange={(e) => updateOfferDraft(idx, "stock", e.target.value)}
+                                    />
+                                  </div>
+                                  <div className="admin-field">
+                                    <label>Minimum Order (MOQ)</label>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      placeholder="1"
+                                      value={offer.moq}
+                                      onChange={(e) => updateOfferDraft(idx, "moq", e.target.value)}
+                                    />
+                                  </div>
+                                  <div className="admin-field-full">
+                                    <label>Retailer Product URL</label>
+                                    <input
+                                      required={idx === 0}
+                                      type="url"
+                                      placeholder="https://www.digikey.com/product/..."
+                                      value={offer.sellerUrl}
+                                      onChange={(e) => updateOfferDraft(idx, "sellerUrl", e.target.value)}
+                                    />
+                                  </div>
+                                  <div className="admin-field-full">
+                                    <label>Price Checked On</label>
+                                    <input
+                                      required={idx === 0}
+                                      type="date"
+                                      value={offer.checkedAt}
+                                      onChange={(e) => updateOfferDraft(idx, "checkedAt", e.target.value)}
+                                    />
+                                  </div>
+                                </fieldset>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="admin-form-actions admin-field-full">
+                          <button
+                            type="button"
+                            className="button button-outline"
+                            onClick={() => setCompFormOpen(false)}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="button button-dark"
+                            disabled={compSaving}
+                          >
+                            {compSaving ? (
+                              <>
+                                <RefreshCw size={15} className="spin-icon" /> Saving…
+                              </>
+                            ) : (
+                              <>
+                                <Check size={16} /> {editingProductId ? "Update Component" : "Publish to Catalog"}
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+
+                  {/* Search Bar */}
+                  <div className="admin-filter-bar">
+                    <div className="admin-search-wrapper">
+                      <Search size={16} className="admin-search-icon" />
+                      <input
+                        type="text"
+                        placeholder="Search by part name, MPN, manufacturer, or category…"
+                        value={compSearch}
+                        onChange={(e) => setCompSearch(e.target.value)}
+                      />
+                      {compSearch && (
+                        <button
+                          type="button"
+                          className="admin-clear-search"
+                          onClick={() => setCompSearch("")}
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="admin-item-count-badge">
+                      <span>{filteredComponents.length} items in catalog</span>
+                    </div>
+                  </div>
+
+                  {/* Components Grid */}
+                  {productRowsLoading ? (
+                    <div className="admin-loading-state">
+                      <RefreshCw size={28} className="spin-icon" />
+                      <p>Loading hardware components…</p>
+                    </div>
+                  ) : filteredComponents.length === 0 ? (
+                    <div className="admin-empty-state">
+                      <Cpu size={40} />
+                      <h3>No components found</h3>
+                      <p>Add components with dual seller offers to compare prices.</p>
+                      <button className="button button-outline button-small" onClick={startCreateComponent}>
+                        <Plus size={14} /> Add Component
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="admin-components-grid">
+                      {filteredComponents.map((product) => {
+                        const details = product.componentDetails;
+                        const offers = details?.offers ?? [];
+                        return (
+                          <article className="admin-comp-card" key={product.id}>
+                            <div className="admin-comp-top">
+                              <div className="admin-comp-thumb">
+                                {details?.imageUrl ? (
+                                  <img
+                                    src={details.imageUrl}
+                                    alt={product.title}
+                                    onError={(e) => {
+                                      (e.target as HTMLElement).style.display = "none";
+                                    }}
+                                  />
+                                ) : (
+                                  <Cpu size={26} className="admin-comp-fallback-icon" />
+                                )}
+                              </div>
+                              <div className="admin-comp-main">
+                                <div className="admin-comp-tags">
+                                  {details?.mpn && (
+                                    <span className="admin-mpn-badge">{details.mpn}</span>
+                                  )}
+                                  {details?.category && (
+                                    <span className="admin-cat-badge">{details.category}</span>
+                                  )}
+                                </div>
+                                <h4>{product.title}</h4>
+                                <p className="admin-comp-mfg">{product.organization}</p>
+                              </div>
+                            </div>
+
+                            <p className="admin-comp-summary">{product.summary}</p>
+
+                            {/* Dual Seller Price Comparison Row */}
+                            <div className="admin-comp-offers-strip">
+                              {offers.length === 0 ? (
+                                <span className="admin-no-offers">No seller offers registered</span>
+                              ) : (
+                                offers.map((offer, oIdx) => (
+                                  <div className="admin-offer-box" key={oIdx}>
+                                    <div className="admin-offer-box-header">
+                                      <strong>{offer.seller}</strong>
+                                      {offer.stock !== null && (
+                                        <small className="admin-offer-stock">
+                                          {offer.stock > 0 ? `${offer.stock} in stock` : "Out of stock"}
+                                        </small>
+                                      )}
+                                    </div>
+                                    <div className="admin-offer-box-price">
+                                      <span>{offer.currency}</span>
+                                      <strong>{offer.price.toFixed(2)}</strong>
+                                      <small>/ unit</small>
+                                    </div>
+                                    <a
+                                      href={offer.sellerUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="admin-offer-link"
+                                    >
+                                      Verify Link <ExternalLink size={11} />
+                                    </a>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            <div className="admin-comp-card-footer">
+                              <button
+                                className="button button-outline button-small"
+                                type="button"
+                                onClick={() => startEditComponent(product.id)}
+                              >
+                                <Edit size={14} /> Edit Specs & Offers
+                              </button>
+                              <button
+                                className="button button-danger-ghost button-small"
+                                type="button"
+                                onClick={() => void deleteComponent(product)}
+                                title="Remove component from catalog"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {/* SECTION: STUDENT ACTIVITY */}
+              {adminSection === "activity" && (
+                <section className="admin-activity-view">
+                  <div className="admin-section-header">
+                    <div>
+                      <div className="eyebrow"><span className="eyebrow-line" /> STUDENT ANALYTICS</div>
+                      <h2>Opportunity Tracking & Inquiries</h2>
+                      <p className="admin-section-desc">
+                        Real-time student-reported visits, applications, and registrations across opportunities.
+                      </p>
+                    </div>
+                  </div>
+
+                  {activityError && (
+                    <div className="admin-alert-banner" role="alert" style={{ marginBottom: 16 }}>
+                      <AlertCircle size={18} />
+                      <span>{activityError}</span>
+                    </div>
+                  )}
+
+                  {/* Summary Metric Ribbon */}
+                  <div className="admin-activity-summary-ribbon">
+                    <div className="admin-ribbon-stat">
+                      <span className="ribbon-label">Total Student Interactions</span>
+                      <strong className="ribbon-num">{opportunityActivities.length}</strong>
+                    </div>
+                    <div className="admin-ribbon-stat">
+                      <span className="ribbon-label">Applications & Registrations</span>
+                      <strong className="ribbon-num text-success">{appliedCount}</strong>
+                    </div>
+                    <div className="admin-ribbon-stat">
+                      <span className="ribbon-label">Opportunity Inquiries / Visits</span>
+                      <strong className="ribbon-num text-info">{visitedCount}</strong>
+                    </div>
+                    <div className="admin-ribbon-stat">
+                      <span className="ribbon-label">Conversion Rate</span>
+                      <strong className="ribbon-num">
+                        {opportunityActivities.length > 0
+                          ? `${Math.round((appliedCount / opportunityActivities.length) * 100)}%`
+                          : "0%"}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* Filter & Search Bar */}
+                  <div className="admin-filter-bar">
+                    <div className="admin-search-wrapper">
+                      <Search size={16} className="admin-search-icon" />
+                      <input
+                        type="text"
+                        placeholder="Search student name, college, or opportunity…"
+                        value={activitySearch}
+                        onChange={(e) => setActivitySearch(e.target.value)}
+                      />
+                      {activitySearch && (
+                        <button
+                          type="button"
+                          className="admin-clear-search"
+                          onClick={() => setActivitySearch("")}
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="admin-filter-group">
+                      <div className="admin-tab-group">
+                        {[
+                          { id: "all", label: "All Status" },
+                          { id: "applied", label: "Applied" },
+                          { id: "visited", label: "Visited" },
+                        ].map(({ id, label }) => (
+                          <button
+                            key={id}
+                            type="button"
+                            className={`admin-filter-tab ${activityStatusFilter === id ? "active" : ""}`}
+                            onClick={() => setActivityStatusFilter(id as typeof activityStatusFilter)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="admin-tab-group">
+                        {(["all", "Internships", "Training", "Hackathons"] as const).map((k) => (
+                          <button
+                            key={k}
+                            type="button"
+                            className={`admin-filter-tab ${activityKindFilter === k ? "active" : ""}`}
+                            onClick={() => setActivityKindFilter(k)}
+                          >
+                            {k === "all" ? "All Kinds" : k}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Activity Records List */}
+                  {activityLoading ? (
+                    <div className="admin-loading-state">
+                      <RefreshCw size={28} className="spin-icon" />
+                      <p>Loading activity logs…</p>
+                    </div>
+                  ) : filteredActivities.length === 0 ? (
+                    <div className="admin-empty-state">
+                      <Activity size={40} />
+                      <h3>No student activity matches your filter</h3>
+                      <p>When students click or track opportunities, records will populate here.</p>
+                    </div>
+                  ) : (
+                    <div className="admin-activity-table-wrapper">
+                      <div className="admin-activity-cards-list">
+                        {filteredActivities.map((act) => (
+                          <div className="admin-activity-card-row" key={`${act.user_id}-${act.opportunity_id}`}>
+                            <div className="admin-activity-user-badge">
+                              <div className="admin-student-avatar">
+                                {act.student_name.slice(0, 2).toUpperCase()}
+                              </div>
+                              <div className="admin-activity-student-info">
+                                <strong>{act.student_name}</strong>
+                                <small>
+                                  {act.institution || "College not set"}
+                                  {act.course && ` • ${act.course}`}
+                                  {act.academic_year && ` • ${act.academic_year}`}
+                                </small>
+                              </div>
+                            </div>
+
+                            <div className="admin-activity-target-info">
+                              <span className={`admin-kind-pill kind-${act.opportunity_kind.toLowerCase()}`}>
+                                {act.opportunity_kind}
+                              </span>
+                              <h4>{act.title}</h4>
+                              <p>{act.organization} • {act.city}</p>
+                            </div>
+
+                            <div className="admin-activity-status-col">
+                              <span className={`opportunity-activity-status ${act.status}`}>
+                                {act.status === "applied" ? (
+                                  <>
+                                    <CheckCircle2 size={13} /> Applied / Registered
+                                  </>
+                                ) : (
+                                  <>
+                                    <Eye size={13} /> Visited
+                                  </>
+                                )}
+                              </span>
+                              <small className="admin-activity-timestamp">
+                                {new Intl.DateTimeFormat(undefined, {
+                                  dateStyle: "medium",
+                                  timeStyle: "short",
+                                }).format(
+                                  new Date(act.status === "applied" && act.applied_at ? act.applied_at : act.visited_at)
+                                )}
+                              </small>
+                            </div>
+
+                            <div className="admin-activity-action-col">
+                              <a
+                                className="button button-outline button-small"
+                                href={act.opportunity_url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                View Listing <ArrowUpRight size={13} />
+                              </a>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {/* SECTION: ADMIN PROFILE */}
+              {adminSection === "profile" && (
+                <section className="admin-profile-view">
+                  <div className="admin-profile-container">
+                    <div className="admin-profile-card">
+                      <div className="admin-profile-header">
+                        <div className="admin-profile-avatar-large">
+                          <UserRound size={36} />
+                          <div className="admin-avatar-badge">
+                            <ShieldCheck size={16} />
+                          </div>
+                        </div>
+                        <div className="admin-profile-titles">
+                          <span className="eyebrow"><span className="eyebrow-line" /> AUTHENTICATED USER</span>
+                          <h2>Administrator Profile</h2>
+                          <span className="admin-role-badge">
+                            <ShieldCheck size={14} /> Database Superuser
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="admin-profile-grid">
+                        <div className="admin-profile-stat-box">
+                          <span className="stat-label">Admin Email</span>
+                          <strong className="stat-value">{adminEmail || "Email unavailable"}</strong>
+                        </div>
+                        <div className="admin-profile-stat-box">
+                          <span className="stat-label">Authentication Provider</span>
+                          <strong className="stat-value">Supabase Identity</strong>
+                        </div>
+                        <div className="admin-profile-stat-box">
+                          <span className="stat-label">Row-Level Security</span>
+                          <strong className="stat-value text-success">Active & Enforced</strong>
+                        </div>
+                        <div className="admin-profile-stat-box">
+                          <span className="stat-label">Payment Gateway Mode</span>
+                          <strong className="stat-value">Cashfree Sandbox</strong>
+                        </div>
+                      </div>
+
+                      <div className="admin-security-checklist">
+                        <h4>Security & Access Enforcement</h4>
+                        <ul>
+                          <li>
+                            <CheckCircle2 size={16} className="text-success" />
+                            <span>Database function <code>is_admin()</code> validates role on every query</span>
+                          </li>
+                          <li>
+                            <CheckCircle2 size={16} className="text-success" />
+                            <span>Listings INSERT / UPDATE / DELETE restricted to authenticated administrators</span>
+                          </li>
+                          <li>
+                            <CheckCircle2 size={16} className="text-success" />
+                            <span>Student inquiries and tracking activity secured via Postgres policies</span>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div className="admin-profile-actions">
+                        <button
+                          className="button button-danger"
+                          type="button"
+                          onClick={() => void signOut()}
+                        >
+                          <LogOut size={16} /> Sign Out of Admin Console
+                        </button>
+                        <button
+                          className="button button-outline"
+                          type="button"
+                          onClick={onExit}
+                        >
+                          Return to Website
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -3517,7 +9115,7 @@ async function loadAdminOpportunityActivities(client: SupabaseClient): Promise<A
       status: activity.status === "applied" ? "applied" : "visited",
       student_name: profile?.display_name?.trim() || `Student ${activity.user_id.slice(0, 8)}`,
       institution: profile?.institution ?? "",
-      course: profile?.course ?? "",
+      course: sanitizeCourse(profile?.course),
       academic_year: profile?.academic_year ?? "",
     };
   });
