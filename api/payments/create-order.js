@@ -46,12 +46,22 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Choose at least 1 project for checkout." });
     }
 
-    const projectNumbers = projectIds.map((id) => {
+    const SPECIAL_OFFER_ID = "special-offer-dc-fan-kit";
+    const SPECIAL_OFFER_PRICE = 20;
+
+    const projectPrices = projectIds.map((id) => {
+      if (id === SPECIAL_OFFER_ID) {
+        return SPECIAL_OFFER_PRICE;
+      }
       const match = typeof id === "string" && /(?:sample-)?project-(\d{1,2})$/.exec(id);
-      return match ? Number(match[1]) : 0;
+      const num = match ? Number(match[1]) : 0;
+      if (num >= 1 && num <= prices.length) {
+        return prices[num - 1] || 2999;
+      }
+      return 2999;
     });
 
-    const subtotal = projectNumbers.reduce((sum, num) => sum + (prices[num - 1] || 2999), 0);
+    const subtotal = projectPrices.reduce((sum, p) => sum + p, 0);
     const shippingCharges = 0;
     const totalAmount = subtotal + shippingCharges;
 
