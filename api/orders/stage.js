@@ -2,24 +2,37 @@ const FALLBACK_SUPABASE_URL = "https://zomwoprlbydezbbliyui.supabase.co";
 const FALLBACK_SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvbXdvcHJsYnlkZXpiYmxpeXVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4OTQ0MTEsImV4cCI6MjEwNzQ3MDQxMX0.ZsmboSVX_kN4J79tIbZBIbdFMIOijyhfqcayAbGHlt4";
 
+const TRACKING_STAGES = [
+  "Order Placed",
+  "Confirmed",
+  "Building (Processing)",
+  "Testing / Quality Check",
+  "Packed",
+  "Shipped",
+  "Delivered",
+  "Cancelled",
+  "Refunded",
+];
+
 export default async function handler(req, res) {
+  // CORS & method check
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { id } = req.query;
   const body = req.body || {};
+  const order_id = body.order_id || body.id || req.query.id;
   const to_stage = body.to_stage || body.stage;
   const note = body.note;
   const courier_name = body.courier_name;
   const courier_tracking_number = body.courier_tracking_number || body.tracking_number;
   const courier_tracking_url = body.courier_tracking_url || body.tracking_url;
   const expected_delivery_date = body.expected_delivery_date;
+  const admin_notes = body.admin_notes || body.internal_notes;
   const changed_by = body.changed_by || body.admin_name || "Admin";
 
-  const TRACKING_STAGES = [
-    "Order Placed", "Confirmed", "Building (Processing)", "Testing / Quality Check",
-    "Packed", "Shipped", "Delivered", "Cancelled", "Refunded"
-  ];
+  if (!order_id) {
+    return res.status(400).json({ error: "Order ID (order_id) is required." });
+  }
 
   if (!to_stage || !TRACKING_STAGES.includes(to_stage)) {
     return res.status(400).json({ error: `Invalid stage. Choose one of: ${TRACKING_STAGES.join(", ")}` });
@@ -43,6 +56,8 @@ export default async function handler(req, res) {
     FALLBACK_SUPABASE_ANON_KEY
   )?.trim();
 
+  let updatedOrder = null;
+
   if (supabaseUrl && supabaseKey) {
     try {
       const patchData = {
@@ -53,17 +68,30 @@ export default async function handler(req, res) {
       if (courier_tracking_number) patchData.courier_tracking_number = courier_tracking_number;
       if (courier_tracking_url) patchData.courier_tracking_url = courier_tracking_url;
       if (expected_delivery_date) patchData.expected_delivery_date = expected_delivery_date;
+      if (admin_notes) patchData.admin_notes = admin_notes;
 
-      await fetch(`${supabaseUrl}/rest/v1/orders?id=eq.${id}`, {
+      // Update orders table
+      const patchRes = await fetch(`${supabaseUrl}/rest/v1/orders?id=eq.${order_id}`, {
         method: "PATCH",
         headers: {
           "content-type": "application/json",
           apikey: supabaseKey,
           authorization: `Bearer ${supabaseKey}`,
+          prefer: "return=representation",
         },
         body: JSON.stringify(patchData),
       });
 
+      if (patchRes.ok) {
+        const rows = await patchRes.json();
+        if (rows && rows.length > 0) {
+          updatedOrder = rows[0];
+        }
+      } else {
+        console.warn("Supabase orders PATCH failed:", patchRes.status, await patchRes.text());
+      }
+
+      // Add status history entry
       await fetch(`${supabaseUrl}/rest/v1/order_status_history`, {
         method: "POST",
         headers: {
@@ -72,7 +100,7 @@ export default async function handler(req, res) {
           authorization: `Bearer ${supabaseKey}`,
         },
         body: JSON.stringify({
-          order_id: id,
+          order_id,
           to_stage,
           changed_by: changed_by || "Admin",
           note: note || `Stage updated to ${to_stage}`,
@@ -80,11 +108,20 @@ export default async function handler(req, res) {
         }),
       });
 
-      return res.status(200).json({ success: true, tracking_status: to_stage });
-    } catch {
-      return res.status(500).json({ error: "Failed to update order tracking stage." });
+      return res.status(200).json({
+        success: true,
+        tracking_status: to_stage,
+        order: updatedOrder,
+      });
+    } catch (err) {
+      console.error("Supabase stage update error:", err);
+      return res.status(500).json({ error: "Failed to update order tracking stage in database." });
     }
   }
 
-  return res.status(200).json({ success: true, tracking_status: to_stage });
+  return res.status(200).json({
+    success: true,
+    tracking_status: to_stage,
+    order: updatedOrder,
+  });
 }

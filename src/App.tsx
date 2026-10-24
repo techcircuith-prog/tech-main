@@ -6596,7 +6596,9 @@ function StudentDashboard({
     fetch(`/api/orders?userId=${encodeURIComponent(userIdToQuery)}&email=${encodeURIComponent(emailToQuery)}`)
       .then(async (res) => {
         if (!res.ok) throw new Error("Could not load your orders.");
-        const data = await res.json();
+        const text = await res.text();
+        let data: any = {};
+        try { data = text ? JSON.parse(text) : {}; } catch {}
         const serverOrders: AdminOrder[] = data.orders || [];
 
         const orderMap = new Map<string, AdminOrder>();
@@ -7690,7 +7692,9 @@ function AdminPage({ onExit }: { onExit: () => void }) {
       })
         .then(async (res) => {
           if (!res.ok) throw new Error("Could not fetch orders.");
-          const data = await res.json();
+          const text = await res.text();
+          let data: any = {};
+          try { data = text ? JSON.parse(text) : {}; } catch {}
           const serverOrders: AdminOrder[] = data.orders || [];
 
           let localOrders: AdminOrder[] = [];
@@ -7835,45 +7839,113 @@ function AdminPage({ onExit }: { onExit: () => void }) {
 
     setStageUpdating(true);
     try {
-      const res = await fetch(`/api/orders/${selectedAdminOrder.id}/stage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to_stage: stageToApply,
-          stage: stageToApply,
-          note: stageNote.trim() || undefined,
-          courier_name: courierNameInput.trim() || undefined,
-          courier_tracking_number: courierTrackingNumberInput.trim() || undefined,
-          tracking_number: courierTrackingNumberInput.trim() || undefined,
-          courier_tracking_url: courierTrackingUrlInput.trim() || undefined,
-          tracking_url: courierTrackingUrlInput.trim() || undefined,
-          expected_delivery_date: expectedDateInput || undefined,
-          admin_notes: internalNotesInput.trim() || undefined,
-          internal_notes: internalNotesInput.trim() || undefined,
-          changed_by: adminEmail || "Administrator",
-          admin_name: adminEmail || "Administrator",
-        }),
-      });
+      const targetOrderId = selectedAdminOrder.id || selectedAdminOrder.order_id;
+      const stagePayload = {
+        order_id: targetOrderId,
+        id: targetOrderId,
+        to_stage: stageToApply,
+        stage: stageToApply,
+        note: stageNote.trim() || undefined,
+        courier_name: courierNameInput.trim() || undefined,
+        courier_tracking_number: courierTrackingNumberInput.trim() || undefined,
+        tracking_number: courierTrackingNumberInput.trim() || undefined,
+        courier_tracking_url: courierTrackingUrlInput.trim() || undefined,
+        tracking_url: courierTrackingUrlInput.trim() || undefined,
+        expected_delivery_date: expectedDateInput || undefined,
+        admin_notes: internalNotesInput.trim() || undefined,
+        internal_notes: internalNotesInput.trim() || undefined,
+        changed_by: adminEmail || "Administrator",
+        admin_name: adminEmail || "Administrator",
+      };
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update tracking stage.");
+      // 1. Direct Supabase update for immediate database persistence
+      const client = supabase || getSupabase();
+      if (client && targetOrderId) {
+        try {
+          const patchObj: Record<string, any> = {
+            tracking_status: stageToApply,
+            updated_at: new Date().toISOString(),
+          };
+          if (courierNameInput.trim()) patchObj.courier_name = courierNameInput.trim();
+          if (courierTrackingNumberInput.trim()) patchObj.courier_tracking_number = courierTrackingNumberInput.trim();
+          if (courierTrackingUrlInput.trim()) patchObj.courier_tracking_url = courierTrackingUrlInput.trim();
+          if (expectedDateInput) patchObj.expected_delivery_date = expectedDateInput;
+          if (internalNotesInput.trim()) patchObj.admin_notes = internalNotesInput.trim();
 
+          await client.from("orders").update(patchObj).eq("id", targetOrderId);
+          await client.from("order_status_history").insert({
+            order_id: targetOrderId,
+            from_stage: selectedAdminOrder.tracking_status,
+            to_stage: stageToApply,
+            changed_by: adminEmail || "Administrator",
+            note: stageNote.trim() || `Stage updated to ${stageToApply}`,
+            is_public: true,
+          });
+        } catch (sErr) {
+          console.warn("Direct Supabase tracking update note:", sErr);
+        }
+      }
+
+      // 2. Call serverless endpoint (/api/orders/stage) with fallback to (/api/orders)
+      let apiReturnedOrder: AdminOrder | null = null;
+      try {
+        const res = await fetch("/api/orders/stage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(stagePayload),
+        });
+
+        const rawText = await res.text();
+        let data: any = null;
+        try {
+          data = rawText ? JSON.parse(rawText) : null;
+        } catch {
+          data = null;
+        }
+
+        if (!res.ok && data?.error) {
+          throw new Error(data.error);
+        }
+        if (data?.order) {
+          apiReturnedOrder = data.order;
+        }
+      } catch (apiErr) {
+        // Fallback call to /api/orders
+        try {
+          const fallbackRes = await fetch("/api/orders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "update_stage", ...stagePayload }),
+          });
+          const fbText = await fallbackRes.text();
+          let fbData: any = null;
+          try {
+            fbData = fbText ? JSON.parse(fbText) : null;
+          } catch {}
+          if (fbData?.order) apiReturnedOrder = fbData.order;
+        } catch {}
+      }
+
+      // 3. Keep selected order updated without wiping out existing details
+      const updatedOrderRecord: AdminOrder = apiReturnedOrder || {
+        ...selectedAdminOrder,
+        tracking_status: stageToApply,
+        courier_name: courierNameInput.trim() || selectedAdminOrder.courier_name,
+        courier_tracking_number: courierTrackingNumberInput.trim() || selectedAdminOrder.courier_tracking_number,
+        courier_tracking_url: courierTrackingUrlInput.trim() || selectedAdminOrder.courier_tracking_url,
+        expected_delivery_date: expectedDateInput || selectedAdminOrder.expected_delivery_date,
+        admin_notes: internalNotesInput.trim() || selectedAdminOrder.admin_notes,
+        updated_at: new Date().toISOString(),
+      };
+
+      // 4. Update localStorage cache
       try {
         const raw = localStorage.getItem("techcircuit_orders_store");
         if (raw) {
           const list: AdminOrder[] = JSON.parse(raw);
           const updated = list.map((ord) => {
             if (ord.id === selectedAdminOrder.id || ord.order_id === selectedAdminOrder.order_id) {
-              return {
-                ...ord,
-                tracking_status: stageToApply,
-                courier_name: courierNameInput.trim() || ord.courier_name,
-                courier_tracking_number: courierTrackingNumberInput.trim() || ord.courier_tracking_number,
-                courier_tracking_url: courierTrackingUrlInput.trim() || ord.courier_tracking_url,
-                expected_delivery_date: expectedDateInput || ord.expected_delivery_date,
-                admin_notes: internalNotesInput.trim() || ord.admin_notes,
-                updated_at: new Date().toISOString(),
-              };
+              return updatedOrderRecord;
             }
             return ord;
           });
@@ -7884,7 +7956,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
       showToast(`Order #${selectedAdminOrder.order_number} moved to ${stageToApply}`, "success");
       setConfirmDeliveredDialogOpen(false);
       setConfirmCancelledDialogOpen(false);
-      setSelectedAdminOrder(data.order);
+      setSelectedAdminOrder(updatedOrderRecord);
       setOrdersRevision((r) => r + 1);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Could not update order stage.", "error");

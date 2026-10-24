@@ -689,18 +689,18 @@ const server = createServer(async (request, response) => {
     }
 
     // -------------------------------------------------------------
-    // POST /api/orders/:id/stage: Admin manual tracking stage update
+    // POST /api/orders/:id/stage or POST /api/orders/stage: Admin manual tracking stage update
     // -------------------------------------------------------------
     const stageUpdateMatch = request.method === "POST" && /^\/api\/orders\/([A-Za-z0-9_-]{1,60})\/stage$/.exec(url.pathname);
-    if (stageUpdateMatch) {
-      const targetId = stageUpdateMatch[1];
+    const isStageEndpoint = request.method === "POST" && (url.pathname === "/api/orders/stage" || stageUpdateMatch);
+    if (isStageEndpoint) {
+      const body = JSON.parse(await readRawBody(request));
+      const targetId = stageUpdateMatch ? stageUpdateMatch[1] : (body?.order_id || body?.id);
       const order = ordersStore.get(targetId);
       if (!order) {
         sendJson(response, 404, { error: "Order not found." }, request);
         return;
       }
-
-      const body = JSON.parse(await readRawBody(request));
       const to_stage = body?.to_stage || body?.stage;
       const note = body?.note;
       const courier_name = body?.courier_name;

@@ -25,6 +25,69 @@ export default async function handler(req, res) {
   )?.trim();
 
   if (req.method === "POST") {
+    const body = req.body || {};
+    // Handle stage update requests sent to /api/orders
+    if (body.action === "update_stage" || (body.order_id && body.to_stage)) {
+      const order_id = body.order_id || body.id;
+      const to_stage = body.to_stage || body.stage;
+      const courier_name = body.courier_name;
+      const courier_tracking_number = body.courier_tracking_number || body.tracking_number;
+      const courier_tracking_url = body.courier_tracking_url || body.tracking_url;
+      const expected_delivery_date = body.expected_delivery_date;
+      const admin_notes = body.admin_notes || body.internal_notes;
+      const changed_by = body.changed_by || body.admin_name || "Admin";
+      const note = body.note;
+
+      let updatedOrder = null;
+      if (supabaseUrl && supabaseKey && order_id) {
+        try {
+          const patchData = {
+            tracking_status: to_stage,
+            updated_at: new Date().toISOString(),
+          };
+          if (courier_name) patchData.courier_name = courier_name;
+          if (courier_tracking_number) patchData.courier_tracking_number = courier_tracking_number;
+          if (courier_tracking_url) patchData.courier_tracking_url = courier_tracking_url;
+          if (expected_delivery_date) patchData.expected_delivery_date = expected_delivery_date;
+          if (admin_notes) patchData.admin_notes = admin_notes;
+
+          const patchRes = await fetch(`${supabaseUrl}/rest/v1/orders?id=eq.${order_id}`, {
+            method: "PATCH",
+            headers: {
+              "content-type": "application/json",
+              apikey: supabaseKey,
+              authorization: `Bearer ${supabaseKey}`,
+              prefer: "return=representation",
+            },
+            body: JSON.stringify(patchData),
+          });
+          if (patchRes.ok) {
+            const rows = await patchRes.json();
+            if (rows && rows.length > 0) updatedOrder = rows[0];
+          }
+
+          await fetch(`${supabaseUrl}/rest/v1/order_status_history`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              apikey: supabaseKey,
+              authorization: `Bearer ${supabaseKey}`,
+            },
+            body: JSON.stringify({
+              order_id,
+              to_stage,
+              changed_by: changed_by || "Admin",
+              note: note || `Stage updated to ${to_stage}`,
+              is_public: true,
+            }),
+          });
+        } catch (err) {
+          console.error("Supabase stage update error in /api/orders:", err);
+        }
+      }
+      return res.status(200).json({ success: true, tracking_status: to_stage, order: updatedOrder });
+    }
+
     if (supabaseUrl && supabaseKey) {
       try {
         const orderPayload = req.body;
@@ -57,7 +120,10 @@ export default async function handler(req, res) {
     try {
       const url = new URL(`${supabaseUrl}/rest/v1/orders`);
       url.searchParams.set("select", "*");
-      if (role !== "admin") {
+      const singleId = req.query.id || req.query.order_id;
+      if (singleId) {
+        url.searchParams.set("id", `eq.${singleId}`);
+      } else if (role !== "admin") {
         if (userId && userEmail) {
           url.searchParams.set("or", `(user_id.eq.${userId},customer_email.eq.${userEmail})`);
         } else if (userId) {
