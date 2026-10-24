@@ -77,7 +77,10 @@ function loadPersistedData() {
       const parsed = JSON.parse(readFileSync(DATA_FILE, "utf8"));
       if (Array.isArray(parsed.orders)) {
         for (const ord of parsed.orders) {
-          ordersStore.set(ord.id || ord.order_id, ord);
+          if (ord.id) ordersStore.set(ord.id, ord);
+          if (ord.order_id) ordersStore.set(ord.order_id, ord);
+          if (ord.cashfree_order_id) ordersStore.set(ord.cashfree_order_id, ord);
+          if (ord.order_number) ordersStore.set(ord.order_number, ord);
         }
       }
       if (parsed.history && typeof parsed.history === "object") {
@@ -458,6 +461,10 @@ const server = createServer(async (request, response) => {
         return;
       }
 
+      if (url.searchParams.get("userId")) {
+        order.user_id = url.searchParams.get("userId");
+      }
+
       if (url.searchParams.get("simulate") === "true" || order.payment_status === "PAID") {
         order.payment_status = "PAID";
         if (!order.paid_at) {
@@ -585,8 +592,12 @@ const server = createServer(async (request, response) => {
       if (!isAdminView) {
         // Student view: filter by student's user_id or email
         filtered = filtered.filter((ord) => {
-          if (userId && ord.user_id === userId) return true;
-          if (userEmail && ord.customer_email?.toLowerCase() === userEmail.toLowerCase()) return true;
+          if (userId && ord.user_id && ord.user_id === userId) return true;
+          if (userEmail && ord.customer_email?.toLowerCase().trim() === userEmail.toLowerCase().trim()) return true;
+          if (userId && !ord.user_id && userEmail && ord.customer_email?.toLowerCase().trim() === userEmail.toLowerCase().trim()) {
+            ord.user_id = userId; // associate matching email order
+            return true;
+          }
           return false;
         });
       }
@@ -623,6 +634,41 @@ const server = createServer(async (request, response) => {
           delivered: uniqueOrders.filter((o) => o.tracking_status === "Delivered").length,
         },
       }, request);
+      return;
+    }
+
+    // -------------------------------------------------------------
+    // POST /api/orders: Upsert order record into server store
+    // -------------------------------------------------------------
+    if (request.method === "POST" && url.pathname === "/api/orders") {
+      try {
+        const rawBody = await readRawBody(request);
+        const orderData = JSON.parse(rawBody);
+        if (!orderData || (!orderData.id && !orderData.order_id)) {
+          sendJson(response, 400, { error: "Order ID is required." }, request);
+          return;
+        }
+        const orderId = orderData.id || orderData.order_id;
+        const existing = ordersStore.get(orderId) || {};
+        const merged = {
+          ...existing,
+          ...orderData,
+          id: orderId,
+          order_id: orderId,
+          order_number: orderData.order_number || existing.order_number || `TCH-ORD-${orderId.slice(-6).toUpperCase()}`,
+          payment_status: orderData.payment_status || existing.payment_status || "PAID",
+          tracking_status: orderData.tracking_status || existing.tracking_status || "Order Placed",
+          updated_at: new Date().toISOString(),
+        };
+        ordersStore.set(orderId, merged);
+        if (merged.order_id) ordersStore.set(merged.order_id, merged);
+        if (merged.cashfree_order_id) ordersStore.set(merged.cashfree_order_id, merged);
+        if (merged.order_number) ordersStore.set(merged.order_number, merged);
+        persistData();
+        sendJson(response, 200, { ok: true, order: merged }, request);
+      } catch (e) {
+        sendJson(response, 500, { error: e.message || "Failed to save order." }, request);
+      }
       return;
     }
 

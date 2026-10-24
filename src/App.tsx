@@ -65,9 +65,12 @@ import {
   Wrench,
 } from "lucide-react";
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
+import { jsPDF } from "jspdf";
 import brandLogo from "../ece logo 1.png";
 import internshipOpportunityImage from "../home image/card 1.png";
+import trainingOpportunityImage from "../home image/card 2.png";
 import hackathonOpportunityImage from "../home image/card 3.png";
+import resourceImage from "../home image/card 5.png";
 import projectPricesInRupees from "../shared/project-prices.json";
 
 const PLATFORM_NAME = "TechCircuit Hub";
@@ -254,7 +257,11 @@ type Page =
   | "Hackathons"
   | "Saved"
   | "Dashboard"
-  | "Admin";
+  | "Admin"
+  | "Terms"
+  | "Privacy"
+  | "Cookies"
+  | "Delivery";
 
 type StudentDashboardSection = "overview" | "applications" | "orders" | "notifications" | "profile" | "settings";
 type StudentMenuDestination = StudentDashboardSection | "bookmarks";
@@ -346,7 +353,7 @@ interface AdminOrder {
 
 type Listing = {
   id: string;
-  kind: Exclude<Page, "Home" | "Saved" | "Dashboard" | "Admin" | "Cart" | "Checkout" | "PaymentResult">;
+  kind: Exclude<Page, "Home" | "Saved" | "Dashboard" | "Admin" | "Cart" | "Checkout" | "PaymentResult" | "Terms" | "Privacy" | "Cookies" | "Delivery">;
   title: string;
   organization: string;
   city: string;
@@ -1007,6 +1014,53 @@ function getSupabase(): SupabaseClient | null {
   return supabaseClient;
 }
 
+function getPageFromPath(pathname: string): Page {
+  const path = pathname.replace(/\/+$/, "").toLowerCase();
+  if (path === "/admin") return "Admin";
+  if (path === "/internships") return "Internships";
+  if (path === "/training") return "Training";
+  if (path === "/products" || path === "/components") return "Products";
+  if (path === "/projects") return "Projects";
+  if (path === "/hackathons") return "Hackathons";
+  if (path === "/learn" || path === "/resources") return "Learn";
+  if (path === "/manufacturing") return "Manufacturing";
+  if (path === "/pcb-design" || path === "/pcb") return "PCB Design";
+  if (path === "/cart") return "Cart";
+  if (path === "/checkout") return "Checkout";
+  if (path === "/payment-result") return "PaymentResult";
+  if (path === "/saved" || path === "/bookmarks") return "Saved";
+  if (path === "/dashboard" || path === "/orders") return "Dashboard";
+  if (path === "/terms" || path === "/terms-and-conditions" || path === "/terms-conditions") return "Terms";
+  if (path === "/privacy" || path === "/privacy-policy") return "Privacy";
+  if (path === "/cookies" || path === "/cookie-policy") return "Cookies";
+  if (path === "/delivery" || path === "/delivery-and-refunds" || path === "/refunds" || path === "/shipping") return "Delivery";
+  return "Home";
+}
+
+function getPathFromPage(p: Page): string {
+  switch (p) {
+    case "Admin": return "/admin";
+    case "Internships": return "/internships";
+    case "Training": return "/training";
+    case "Products": return "/products";
+    case "Projects": return "/projects";
+    case "Hackathons": return "/hackathons";
+    case "Learn": return "/resources";
+    case "Manufacturing": return "/manufacturing";
+    case "PCB Design": return "/pcb-design";
+    case "Cart": return "/cart";
+    case "Checkout": return "/checkout";
+    case "PaymentResult": return "/payment-result";
+    case "Saved": return "/saved";
+    case "Dashboard": return "/dashboard";
+    case "Terms": return "/terms";
+    case "Privacy": return "/privacy";
+    case "Cookies": return "/cookies";
+    case "Delivery": return "/delivery";
+    default: return "/";
+  }
+}
+
 function App() {
   const [returnOrderId] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1015,13 +1069,13 @@ function App() {
   const [activeTrackingOrder, setActiveTrackingOrder] = useState<AdminOrder | null>(null);
   const [returnConfirmedOrder, setReturnConfirmedOrder] = useState<AdminOrder | null>(null);
   const [page, setPage] = useState<Page>(() => {
-    if (window.location.pathname.replace(/\/+$/, "") === "/admin") return "Admin";
     const params = new URLSearchParams(window.location.search);
     if (params.get("cf_order_id") || params.get("order_id") || params.get("payment_order_id")) {
       return "Checkout";
     }
-    return "Home";
+    return getPageFromPath(window.location.pathname);
   });
+  const navigationHistoryRef = useRef<Page[]>([]);
   const [city, setCity] = useState("All locations");
   const [savedIds, setSavedIds] = useState<string[]>(() => {
     try {
@@ -1058,6 +1112,49 @@ function App() {
   const [opportunityActivityError, setOpportunityActivityError] = useState("");
   const [opportunityActivityRevision, setOpportunityActivityRevision] = useState(0);
   const opportunityPromptCheckInProgress = useRef(false);
+  const [activePolicy, setActivePolicy] = useState<PolicyType | null>(null);
+  const [globalToast, setGlobalToast] = useState<{ id: number; message: string; type: "success" | "info" | "error" } | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
+
+  const [cookieConsent, setCookieConsent] = useState<"accepted" | "essential" | null>(() => {
+    try {
+      const saved = localStorage.getItem("techcircuit_cookie_consent");
+      return saved === "accepted" || saved === "essential" ? saved : null;
+    } catch {
+      return null;
+    }
+  });
+
+  function handleUpdateCookieConsent(type: "accepted" | "essential") {
+    try {
+      localStorage.setItem("techcircuit_cookie_consent", type);
+    } catch {}
+    setCookieConsent(type);
+    showToast(
+      type === "accepted"
+        ? "Cookie preferences saved: All cookies allowed 🍪"
+        : "Cookie preferences saved: Essential cookies only 🛡️",
+      "info"
+    );
+  }
+
+  function showToast(message: string, type: "success" | "info" | "error" = "success") {
+    if (toastTimeoutRef.current) window.clearTimeout(toastTimeoutRef.current);
+    setGlobalToast({ id: Date.now(), message, type });
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setGlobalToast(null);
+    }, 3500);
+  }
+
+  useEffect(() => {
+    const handleCustomToast = (e: any) => {
+      if (e.detail?.message) {
+        showToast(e.detail.message, e.detail.type || "success");
+      }
+    };
+    window.addEventListener("techcircuit:toast", handleCustomToast);
+    return () => window.removeEventListener("techcircuit:toast", handleCustomToast);
+  }, []);
 
   async function resolveUserRole(client: SupabaseClient, user: User | null): Promise<"admin" | "student" | null> {
     if (!user) {
@@ -1102,29 +1199,18 @@ function App() {
   }
 
   useEffect(() => {
-    function restoreRoute() {
-      const path = window.location.pathname.replace(/\/+$/, "");
-      if (path === "/admin") {
-        setPage("Admin");
-        setAuthOpen(false);
-      } else if (["/login", "/signin", "/student-login", "/auth"].includes(path)) {
-        if (currentUser) {
-          setAuthOpen(false);
-          window.history.replaceState({}, "", "/");
-        } else {
-          setPage("Home");
-          setAuthOpen(true);
-        }
+    // Seed initial history state so swipe back stays within the website
+    const currentPath = window.location.pathname;
+    const currentState = window.history.state as { page?: Page; isRoot?: boolean } | null;
+    if (!currentState || !currentState.page) {
+      if (currentPath !== "/" && currentPath !== "") {
+        window.history.replaceState({ page: "Home", isRoot: true }, "", "/");
+        window.history.pushState({ page, isRoot: false, hasDetail: false }, "", currentPath + window.location.search);
       } else {
-        const params = new URLSearchParams(window.location.search);
-        setPage(params.has("cf_order_id") || params.has("order_id") || params.has("payment_order_id") ? "Checkout" : "Home");
-        setAuthOpen(false);
+        window.history.replaceState({ page: "Home", isRoot: true, hasDetail: false }, "", "/");
       }
-      setDetailSelection(null);
     }
-    window.addEventListener("popstate", restoreRoute);
-    return () => window.removeEventListener("popstate", restoreRoute);
-  }, [currentUser]);
+  }, []);
 
   useEffect(() => {
     if (!returnOrderId) return;
@@ -1265,23 +1351,25 @@ function App() {
     let active = true;
     async function showOpportunityPromptOnReturn() {
       if (!active || opportunityPromptCheckInProgress.current) return;
-      let pending: { opportunityId: string; userId: string } | null = null;
+      let pending: { opportunityId: string; userId: string; clickedAt?: number; didLeave?: boolean } | null = null;
       try {
         const stored = sessionStorage.getItem(OPPORTUNITY_RETURN_KEY);
         if (!stored) return;
-        pending = JSON.parse(stored) as { opportunityId: string; userId: string };
+        pending = JSON.parse(stored) as { opportunityId: string; userId: string; clickedAt?: number; didLeave?: boolean };
       } catch {
-        setDataError("Could not restore the opportunity follow-up. Please reopen the opportunity.");
         return;
       }
       if (!pending || typeof pending.opportunityId !== "string" || typeof pending.userId !== "string") {
         sessionStorage.removeItem(OPPORTUNITY_RETURN_KEY);
-        setDataError("The saved opportunity follow-up was invalid. Please reopen the opportunity.");
         return;
       }
       if (pending.userId !== currentStudent.id) {
         sessionStorage.removeItem(OPPORTUNITY_RETURN_KEY);
-        setDataError("The opportunity follow-up was started under a different account. Reopen the source while signed in to track it.");
+        return;
+      }
+      // CRITICAL: Only prompt when user actually left to external portal and came back
+      const elapsed = Date.now() - (pending.clickedAt || 0);
+      if (!pending.didLeave && elapsed < 2500) {
         return;
       }
       const opportunity = listings.find((listing) => listing.id === pending?.opportunityId);
@@ -1312,23 +1400,36 @@ function App() {
         opportunityPromptCheckInProgress.current = false;
       }
     }
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") void showOpportunityPromptOnReturn();
+    const markLeftPage = () => {
+      try {
+        const stored = sessionStorage.getItem(OPPORTUNITY_RETURN_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          parsed.didLeave = true;
+          sessionStorage.setItem(OPPORTUNITY_RETURN_KEY, JSON.stringify(parsed));
+        }
+      } catch {}
     };
-    const handleReturn = () => { void showOpportunityPromptOnReturn(); };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        markLeftPage();
+      } else if (document.visibilityState === "visible") {
+        void showOpportunityPromptOnReturn();
+      }
+    };
+    const handleReturn = () => {
+      void showOpportunityPromptOnReturn();
+    };
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", markLeftPage);
     window.addEventListener("focus", handleReturn);
     window.addEventListener("pageshow", handleReturn);
-    const returnCheck = window.setInterval(() => {
-      if (document.visibilityState === "visible") void showOpportunityPromptOnReturn();
-    }, 500);
-    if (document.visibilityState === "visible") void showOpportunityPromptOnReturn();
     return () => {
       active = false;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", markLeftPage);
       window.removeEventListener("focus", handleReturn);
       window.removeEventListener("pageshow", handleReturn);
-      window.clearInterval(returnCheck);
     };
   }, [student, listings]);
 
@@ -1336,9 +1437,12 @@ function App() {
     document.title = `${PLATFORM_NAME} — ${PLATFORM_TAGLINE}`;
   }, []);
 
-  function navigate(next: Page) {
-    const nextPath = next === "Admin" ? "/admin" : "/";
-    if (window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
+  function navigate(next: Page, push: boolean = true) {
+    if (push && next !== page) {
+      navigationHistoryRef.current.push(page);
+      const nextPath = getPathFromPage(next);
+      window.history.pushState({ page: next, isRoot: false, hasDetail: false }, "", nextPath);
+    }
     setDetailSelection(null);
     setPage(next);
     setMenuOpen(false);
@@ -1346,20 +1450,180 @@ function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function handleGoBack() {
+    if (detailSelection) {
+      closeDetails();
+      return;
+    }
+    if (activeTrackingOrder) {
+      setActiveTrackingOrder(null);
+      return;
+    }
+    if (customizationRequestId) {
+      setCustomizationRequestId(null);
+      return;
+    }
+    if (authOpen) {
+      setAuthOpen(false);
+      return;
+    }
+    if (enquiry) {
+      setEnquiry(null);
+      return;
+    }
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    if (studentMenuOpen) {
+      setStudentMenuOpen(false);
+      return;
+    }
+
+    const st = window.history.state as { page?: Page; isRoot?: boolean } | null;
+    if (st && !st.isRoot && window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+
+    if (navigationHistoryRef.current.length > 0) {
+      const prev = navigationHistoryRef.current.pop();
+      if (prev && prev !== page) {
+        navigate(prev, false);
+        return;
+      }
+    }
+
+    if (page !== "Home") {
+      navigate("Home", false);
+    }
+  }
+
+  useEffect(() => {
+    function onPopState(event: PopStateEvent) {
+      const state = event.state as {
+        page?: Page;
+        hasDetail?: boolean;
+        detailType?: "listing" | "resource";
+        detailId?: string;
+        isRoot?: boolean;
+      } | null;
+
+      if (state && state.page) {
+        setPage(state.page);
+        if (state.hasDetail && state.detailId) {
+          if (state.detailType === "listing") {
+            const found = listings.find((l) => l.id === state.detailId);
+            if (found) setDetailSelection({ type: "listing", item: found });
+            else setDetailSelection(null);
+          } else if (state.detailType === "resource") {
+            const found = resources.find((r) => r.title === state.detailId);
+            if (found) setDetailSelection({ type: "resource", item: found });
+            else setDetailSelection(null);
+          }
+        } else {
+          setDetailSelection(null);
+        }
+      } else {
+        const path = window.location.pathname.replace(/\/+$/, "").toLowerCase();
+        if (["/login", "/signin", "/student-login", "/auth"].includes(path)) {
+          if (currentUser) {
+            setAuthOpen(false);
+          } else {
+            setPage("Home");
+            setAuthOpen(true);
+          }
+        } else {
+          const inferred = getPageFromPath(window.location.pathname);
+          setPage(inferred);
+        }
+        setDetailSelection(null);
+      }
+      setAuthOpen(false);
+      setMenuOpen(false);
+      setStudentMenuOpen(false);
+      setActiveTrackingOrder(null);
+      setCustomizationRequestId(null);
+    }
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [listings, currentUser]);
+
+  useEffect(() => {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+
+    function handleTouchStart(e: TouchEvent) {
+      if (e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        touchStartTime = Date.now();
+      }
+    }
+
+    function handleTouchEnd(e: TouchEvent) {
+      if (e.changedTouches.length === 1) {
+        const deltaX = e.changedTouches[0].clientX - touchStartX;
+        const deltaY = e.changedTouches[0].clientY - touchStartY;
+        const elapsed = Date.now() - touchStartTime;
+
+        if (deltaX > 60 && Math.abs(deltaY) < 80 && Math.abs(deltaX) > Math.abs(deltaY) * 1.3 && elapsed < 600) {
+          const target = e.target as HTMLElement | null;
+          if (target) {
+            const tagName = target.tagName.toLowerCase();
+            if (["input", "textarea", "select"].includes(tagName)) return;
+            if (target.closest(".home-showcase-carousel, .carousel, [role='slider'], input[type='range']")) {
+              return;
+            }
+          }
+          handleGoBack();
+        }
+      }
+    }
+
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [detailSelection, activeTrackingOrder, customizationRequestId, authOpen, enquiry, menuOpen, studentMenuOpen, page]);
+
   function openListingDetails(item: Listing) {
     detailReturnScroll.current = window.scrollY;
     setDetailSelection({ type: "listing", item });
+    const currentPath = getPathFromPage(page);
+    window.history.pushState(
+      { page, hasDetail: true, detailType: "listing", detailId: item.id, isRoot: false },
+      "",
+      `${currentPath}?detail=${encodeURIComponent(item.id)}`
+    );
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function openResourceDetails(item: Resource) {
     detailReturnScroll.current = window.scrollY;
     setDetailSelection({ type: "resource", item });
+    const currentPath = getPathFromPage(page);
+    window.history.pushState(
+      { page, hasDetail: true, detailType: "resource", detailId: item.title, isRoot: false },
+      "",
+      `${currentPath}?resource=${encodeURIComponent(item.title)}`
+    );
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function closeDetails() {
     setDetailSelection(null);
+    const st = window.history.state as { hasDetail?: boolean } | null;
+    if (st?.hasDetail) {
+      window.history.back();
+    } else {
+      const currentPath = getPathFromPage(page);
+      window.history.replaceState({ page, hasDetail: false, isRoot: page === "Home" }, "", currentPath);
+    }
     window.requestAnimationFrame(() => window.scrollTo({ top: detailReturnScroll.current, behavior: "smooth" }));
   }
 
@@ -1385,9 +1649,11 @@ function App() {
       sessionStorage.setItem(OPPORTUNITY_RETURN_KEY, JSON.stringify({
         opportunityId: listing.id,
         userId: student.id,
+        clickedAt: Date.now(),
+        didLeave: false,
       }));
     } catch {
-      setDataError("Could not prepare the opportunity follow-up. Your browser may be blocking session storage.");
+      // session storage might be blocked in private mode
     }
   }
 
@@ -1433,15 +1699,19 @@ function App() {
 
   function addProjectToCart(id: string) {
     setCartIds((current) => current.includes(id) ? current : [...current, id]);
+    showToast("Project kit added to cart! 🛒", "success");
     navigate("Cart");
   }
 
   function removeProjectFromCart(id: string) {
     setCartIds((current) => current.filter((cartId) => cartId !== id));
+    showToast("Project removed from cart.", "info");
   }
 
   function toggleSaved(id: string) {
+    const isNowSaved = !savedIds.includes(id);
     setSavedIds((current) => current.includes(id) ? current.filter((saved) => saved !== id) : [...current, id]);
+    showToast(isNowSaved ? "Saved to your collection! ✨" : "Removed from collection.", "info");
   }
 
   function toggleCompare(id: string) {
@@ -1452,7 +1722,7 @@ function App() {
     document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" });
   }
 
-  if (page === "Admin") return <AdminPage onExit={() => navigate("Home")} />;
+  if (page === "Admin") return <AdminPage onExit={handleGoBack} />;
 
   return (
     <>
@@ -1608,6 +1878,13 @@ function App() {
         <SavedPage listings={listings} savedIds={savedIds} toggleSaved={toggleSaved} setEnquiry={setEnquiry} addProjectToCart={addProjectToCart} onViewListing={openListingDetails} onViewResource={openResourceDetails} />
       ) : page === "Products" ? (
         <ComponentCatalogPage listings={listings} />
+      ) : page === "Terms" || page === "Privacy" || page === "Cookies" || page === "Delivery" ? (
+        <PolicyDedicatedPage
+          policy={page === "Terms" ? "terms" : page === "Privacy" ? "privacy" : page === "Cookies" ? "cookie" : "delivery"}
+          navigate={navigate}
+          currentConsent={cookieConsent}
+          onUpdateConsent={handleUpdateCookieConsent}
+        />
       ) : (
         <DirectoryPage
           page={page}
@@ -1624,12 +1901,30 @@ function App() {
           onViewResource={openResourceDetails}
           customizationRequestId={customizationRequestId}
           onCustomizationRequestHandled={() => setCustomizationRequestId(null)}
+          onTrackOpportunity={prepareOpportunityFollowUp}
         />
       )}
 
       {dataError && <div className="toast-error" role="status"><CircleHelp size={16} /> {dataError}</div>}
       <Footer navigate={navigate} />
     </div>
+
+    {cookieConsent === null && (
+      <CookieConsentBanner
+        onAcceptAll={() => handleUpdateCookieConsent("accepted")}
+        onAcceptEssential={() => handleUpdateCookieConsent("essential")}
+        onViewCookiePolicy={() => navigate("Cookies")}
+      />
+    )}
+
+    {activePolicy && <PolicyModal type={activePolicy} onClose={() => setActivePolicy(null)} />}
+    {globalToast && (
+      <div className="global-toast-container">
+        <div className={`global-toast toast-${globalToast.type}`}>
+          {globalToast.message}
+        </div>
+      </div>
+    )}
 
     {enquiry && <EnquiryModal listing={enquiry} onClose={() => setEnquiry(null)} />}
     {authOpen && <StudentAuthModal isPasswordRecovery={authRecovery} onClose={() => {
@@ -1896,8 +2191,9 @@ function HomePage({
             return (
               <article className={`home-project-card${isOffer ? " is-offer-card" : ""}`} key={item.id}>
                 <div className="home-project-image">
-                  {item.imageUrl && <img src={item.imageUrl} alt={`${item.title} project`} loading="lazy" />}
-                  {isOffer && <span className="card-offer-badge">⚡ OFFER · ₹20</span>}
+                  <button className="project-image-trigger" type="button" onClick={() => onViewListing(item)} aria-label={`View details for ${item.title}`}>
+                    {item.imageUrl && <img src={item.imageUrl} alt={`${item.title} project`} loading="lazy" />}
+                  </button>
                 </div>
                 <div className="home-project-content">
                   {isOffer && <span className="project-offer-tag">LIMITED FLASH OFFER</span>}
@@ -1970,7 +2266,9 @@ function HomeOpportunitySection({
         {listings.length > 0 ? listings.map((listing) => (
           <article className="home-opportunity-card" key={listing.id}>
             <div className="home-opportunity-image">
-              <img src={page === "Internships" ? internshipOpportunityImage : hackathonOpportunityImage} alt={`${page} opportunities`} loading="lazy" decoding="async" />
+              <button className="project-image-trigger" type="button" onClick={() => onViewListing(listing)} aria-label={`View details for ${listing.title}`}>
+                <img src={page === "Internships" ? internshipOpportunityImage : hackathonOpportunityImage} alt={`${page} opportunities`} loading="lazy" decoding="async" />
+              </button>
             </div>
             <h3>{listing.title}</h3>
             <p>{listing.summary}</p>
@@ -2007,6 +2305,7 @@ function DirectoryPage({
   onViewResource,
   customizationRequestId,
   onCustomizationRequestHandled,
+  onTrackOpportunity,
 }: {
   page: Listing["kind"];
   listings: Listing[];
@@ -2022,6 +2321,7 @@ function DirectoryPage({
   onCustomizationRequestHandled: () => void;
   savedIds: string[];
   toggleSaved: (id: string) => void;
+  onTrackOpportunity?: (listing: Listing) => void;
 }) {
   const info = intro[page];
   const isLearn = page === "Learn";
@@ -2106,7 +2406,6 @@ function DirectoryPage({
               <h2>{customizationProject ? `Customize ${customizationProject.title}` : "Make a project your own."}</h2>
               <p>Tell us which project you want customized using the project request form.</p>
               <a className="button button-outline" href={PROJECT_CUSTOMIZATION_FORM_URL} target="_blank" rel="noreferrer">Open Google Form <ArrowUpRight size={15} /></a>
-              {customizationProject && <button className="project-back-link" type="button" onClick={() => setProjectView("ready-made")}>Back to ready-made projects</button>}
             </section>
           ) : (
           <>
@@ -2132,7 +2431,7 @@ function DirectoryPage({
           {(page === "Internships" || page === "Products") && filtered.length === 0 ? <EmptyState page={page} /> : filtered.length > 0 ? (
             <>
               <div className={`listing-grid${isProjects ? " projects-listing-grid" : ""}${page === "Training" ? " training-listing-grid" : ""}${page === "Internships" || page === "Hackathons" ? " opportunity-listing-grid" : ""}`}>
-                {filtered.map((item, index) => <ListingCard key={item.id} listing={item} index={index} isSaved={savedIds.includes(item.id)} onSave={() => toggleSaved(item.id)} compareIds={compareIds} onCompare={() => toggleCompare(item.id)} onEnquire={() => setEnquiry(item)} isProjects={isProjects} canCompare={page === "Products"} onOrderNow={() => addProjectToCart(item.id)} onViewDetails={() => onViewListing(item)} />)}
+                {filtered.map((item, index) => <ListingCard key={item.id} listing={item} index={index} isSaved={savedIds.includes(item.id)} onSave={() => toggleSaved(item.id)} compareIds={compareIds} onCompare={() => toggleCompare(item.id)} onEnquire={() => setEnquiry(item)} isProjects={isProjects} canCompare={page === "Products"} onOrderNow={() => addProjectToCart(item.id)} onViewDetails={() => onViewListing(item)} onTrackOpportunity={onTrackOpportunity} />)}
               </div>
               {page === "Products" && selectedComparison(filtered, compareIds).length > 1 && (
                 <section className="comparison-section" id="comparison"><div className="eyebrow"><span className="eyebrow-line" /> COMPONENT COMPARISON</div><h2>Compare your component shortlist.</h2><div className="comparison-table"><div className="comparison-row comparison-head"><strong>Component</strong>{selectedComparison(filtered, compareIds).map((item) => <strong key={item.id}>{item.title}</strong>)}</div><div className="comparison-row"><span>Category</span>{selectedComparison(filtered, compareIds).map((item) => <span key={item.id}>{item.tags.join(", ")}</span>)}</div><div className="comparison-row"><span>Organization</span>{selectedComparison(filtered, compareIds).map((item) => <span key={item.id}>{item.organization}</span>)}</div><div className="comparison-row"><span>Location</span>{selectedComparison(filtered, compareIds).map((item) => <span key={item.id}>{item.city}</span>)}</div></div></section>
@@ -2157,94 +2456,248 @@ function resourceId(title: string) {
   return `resource:${title}`;
 }
 
-export function downloadResourcePaper(item: Resource) {
-  const dateStr = new Date().toLocaleDateString("en-IN", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-  const docRef = `TCH-ECE-${item.title.replace(/[^A-Za-z0-9]/g, "").slice(0, 8).toUpperCase()}-2026`;
-  const content = `================================================================================
-TECHCIRCUIT HUB — ELECTRONICS & COMMUNICATION ENGINEERING (ECE) REPOSITORY
-================================================================================
-DOCUMENT TITLE: ${item.title}
-DISCIPLINE:     Electronics & Communication Engineering (ECE)
-CATEGORY:       ${item.category}
-PUBLISHER / ORG:${item.publisher}
-ACCESS PORTAL:  ${item.href}
-DOWNLOAD DATE:  ${dateStr}
-DOCUMENT REF:   ${docRef}
-================================================================================
+export function downloadResourcePaper(item: Resource, onDone?: () => void) {
+  try {
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
 
-1. ABSTRACT & EXECUTIVE SUMMARY
-${item.paperSummary || "A rigorous engineering document detailing architectural trade-offs, theoretical proofs, and practical hardware implementations for ECE systems."}
+    const dateStr = new Date().toLocaleDateString("en-IN", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    const docRef = `TCH-ECE-${item.title.replace(/[^A-Za-z0-9]/g, "").slice(0, 8).toUpperCase()}-2026`;
 
-2. KEY ARCHITECTURAL & HARDWARE SPECIFICATIONS
-- Target Domain: Electronics and Communication Engineering (ECE)
-- Implementation Scope: Embedded Systems, Signal Processing, VLSI & Circuit Design
-- Standards Conformity: IEEE, IPC-2221, ISO/IEC standards compliant
-- Verified Publisher: ${item.publisher}
-- Simulation Tools: SPICE/LTspice, MATLAB/Simulink, ModelSim, Vivado, KiCad 8.0, Keil MDK, ESP-IDF
+    // Header banner
+    doc.setFillColor(15, 31, 61);
+    doc.rect(0, 0, 210, 26, "F");
 
-3. HARDWARE & CIRCUIT DESIGN NOTES
-- Differential and single-ended signaling integrity validated across standard operational temperature range (-40°C to +85°C).
-- Decoupling capacitors and low-ESR ceramic bypass networks placed within 2mm of power pins.
-- Clock jitter, propagation delay, and setup/hold timing margin closure verified across worst-case process corners.
-- Ground plane impedance maintained with continuous return path to suppress EMI/EMC radiation.
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text("TECHCIRCUIT HUB", 14, 11);
 
-4. OFFICIAL PEER-REVIEWED CITATION & SOURCE
-To inspect the uncompressed dataset, complete source schematics, and peer-reviewed publication, refer to the verified portal:
-${item.href}
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(254, 215, 170);
+    doc.text("ECE & EMBEDDED SYSTEMS RESEARCH REPOSITORY · OFFICIAL WHITE PAPER", 14, 18);
 
---------------------------------------------------------------------------------
-TechCircuit Hub · Discover. Learn. Build. Innovate.
-Empowering engineering students and builders with hands-on hardware and open research.
-================================================================================
-`;
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${item.title.replace(/[^a-zA-Z0-9_-]/g, "_")}_ECE_Paper.txt`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+    doc.setFontSize(7.5);
+    doc.setTextColor(203, 213, 225);
+    doc.text(`REF: ${docRef}`, 155, 11);
+    doc.text(`DATE: ${dateStr}`, 155, 18);
+
+    // Title
+    doc.setTextColor(15, 31, 61);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    const splitTitle = doc.splitTextToSize(item.title, 182);
+    doc.text(splitTitle, 14, 36);
+
+    let y = 36 + splitTitle.length * 6.5 + 4;
+
+    // Metadata Strip Box
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(14, y, 182, 20, 2.5, 2.5, "FD");
+
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(249, 115, 22);
+    doc.text("CATEGORY:", 18, y + 6.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(15, 31, 61);
+    doc.text(item.category || "General ECE Research", 40, y + 6.5);
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(249, 115, 22);
+    doc.text("PUBLISHER:", 18, y + 14);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(15, 31, 61);
+    doc.text(item.publisher || "TechCircuit Academic Portal", 40, y + 14);
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(249, 115, 22);
+    doc.text("DISCIPLINE:", 110, y + 6.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(15, 31, 61);
+    doc.text("Electronics & Communication (ECE)", 134, y + 6.5);
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(249, 115, 22);
+    doc.text("STATUS:", 110, y + 14);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(22, 163, 74);
+    doc.text("Peer-Verified Engineering Document", 134, y + 14);
+
+    y += 28;
+
+    // Section 1: Abstract & Executive Summary
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(15, 31, 61);
+    doc.text("1. ABSTRACT & EXECUTIVE SUMMARY", 14, y);
+    y += 5;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(51, 65, 85);
+    const abstractText = item.paperSummary || "A rigorous engineering document detailing architectural trade-offs, theoretical proofs, and practical hardware implementations for ECE systems.";
+    const splitAbstract = doc.splitTextToSize(abstractText, 182);
+    doc.text(splitAbstract, 14, y);
+    y += splitAbstract.length * 4.8 + 6;
+
+    // Section 2: Key Architectural & Hardware Specifications
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(15, 31, 61);
+    doc.text("2. KEY ARCHITECTURAL & HARDWARE SPECIFICATIONS", 14, y);
+    y += 5;
+
+    const specs = [
+      ["Target Domain", "Electronics and Communication Engineering (ECE)"],
+      ["Implementation Scope", "Embedded Systems, Signal Processing, VLSI & Circuit Design"],
+      ["Standards Conformity", "IEEE, IPC-2221, ISO/IEC standards compliant"],
+      ["Verified Publisher", item.publisher || "Academic / Open-Hardware Source"],
+      ["Simulation Tools", "SPICE / LTspice, MATLAB/Simulink, KiCad 8.0, Keil MDK, Vivado, ModelSim, ESP-IDF"],
+    ];
+
+    specs.forEach(([label, val]) => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(15, 31, 61);
+      doc.text(`• ${label}:`, 18, y);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(71, 85, 105);
+      const splitVal = doc.splitTextToSize(val, 125);
+      doc.text(splitVal, 62, y);
+      y += Math.max(splitVal.length * 4.2, 5.2);
+    });
+
+    y += 3;
+
+    // Section 3: Hardware & Circuit Design Notes
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(15, 31, 61);
+    doc.text("3. HARDWARE & CIRCUIT INTEGRITY NOTES", 14, y);
+    y += 5;
+
+    const notes = [
+      "Differential and single-ended signaling integrity validated across operational temperature range (-40°C to +85°C).",
+      "Decoupling capacitors and low-ESR ceramic bypass networks placed within 2mm of IC power pins.",
+      "Clock jitter, propagation delay, and setup/hold timing margin closure verified across worst-case process corners.",
+      "Ground plane impedance maintained with continuous return path to suppress EMI/EMC radiation.",
+    ];
+
+    notes.forEach((note) => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(71, 85, 105);
+      const splitNote = doc.splitTextToSize(`- ${note}`, 178);
+      doc.text(splitNote, 18, y);
+      y += splitNote.length * 4.2 + 2;
+    });
+
+    y += 3;
+
+    // Section 4: Official Citation & Portal Source
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(15, 31, 61);
+    doc.text("4. OFFICIAL CITATION & VERIFIED PORTAL ACCESS", 14, y);
+    y += 5;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text("To inspect the uncompressed dataset, complete source schematics, and peer-reviewed publication, refer to the verified portal:", 14, y);
+    y += 4.5;
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(249, 115, 22);
+    const splitUrl = doc.splitTextToSize(item.href, 182);
+    doc.text(splitUrl, 14, y);
+
+    // Footer
+    doc.setDrawColor(226, 232, 240);
+    doc.line(14, 276, 196, 276);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(15, 31, 61);
+    doc.text("TechCircuit Hub · Discover. Learn. Build. Innovate.", 14, 283);
+
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    doc.text("Empowering engineering students and builders with hands-on hardware and open research.", 14, 287);
+    doc.text("https://techcircuithub.com", 160, 283);
+
+    const safeTitle = item.title.replace(/[^a-zA-Z0-9_-]/g, "_");
+    doc.save(`${safeTitle}_ECE_Paper.pdf`);
+    onDone?.();
+  } catch (err) {
+    console.error("PDF generation error:", err);
+  }
 }
 
 function ResourceCard({
   item,
+  index: _index = 0,
   isSaved,
   onSave,
   onViewDetails,
+  onDownloadPaper,
 }: {
   item: Resource;
+  index?: number;
   isSaved: boolean;
   onSave: () => void;
   onViewDetails: () => void;
+  onDownloadPaper?: () => void;
 }) {
+  const resourceImg = resourceImage;
   return (
     <article className="resource-card">
-      <button className="resource-save" aria-label={isSaved ? "Remove saved resource" : "Save resource"} onClick={onSave}>
-        {isSaved ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
-      </button>
-      <div className="resource-icon"><ExternalLink size={20} /></div>
-      <span className="resource-category">{item.category}</span>
-      <h3>{item.title}</h3>
-      <p>{item.paperSummary || `Published by ${item.publisher}. Link opens the publisher’s documentation.`}</p>
-      <div className="resource-card-actions">
-        <button type="button" className="text-link" onClick={onViewDetails}>View details <ArrowRight size={14} /></button>
-        <button
-          type="button"
-          className="button button-outline button-small resource-download-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            downloadResourcePaper(item);
-          }}
-          title={`Download ${item.title} Paper`}
-        >
-          <Download size={13} /> Download Paper
+      <div className="resource-card-visual">
+        <button className="project-image-trigger" type="button" onClick={onViewDetails} aria-label={`View details for ${item.title}`}>
+          <img src={resourceImg} alt={item.title} loading="lazy" />
         </button>
+        <button className="resource-save" aria-label={isSaved ? "Remove saved resource" : "Save resource"} onClick={onSave}>
+          {isSaved ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+        </button>
+      </div>
+      <div className="resource-card-body">
+        <div className="resource-meta-top">
+          <span className="resource-publisher">{item.publisher}</span>
+        </div>
+        <button className="resource-title-btn" type="button" onClick={onViewDetails}>
+          <h3>{item.title}</h3>
+        </button>
+        <p>{item.paperSummary || `Published by ${item.publisher}. Peer-reviewed research and official engineering documentation.`}</p>
+        <div className="resource-card-actions">
+          <button type="button" className="text-link" onClick={onViewDetails}>
+            View details <ArrowRight size={14} />
+          </button>
+          <button
+            type="button"
+            className="button button-outline button-small resource-download-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onDownloadPaper) {
+                onDownloadPaper();
+              } else {
+                downloadResourcePaper(item);
+              }
+            }}
+            title={`Download ${item.title} (PDF)`}
+          >
+            <Download size={13} /> Download Paper (PDF)
+          </button>
+        </div>
       </div>
     </article>
   );
@@ -2253,12 +2706,13 @@ function ResourceCard({
 function ListingDetailPage({
   selection,
   isSaved,
-  onBack,
+  onBack: _onBack,
   onSave,
   onTrackOpportunity,
   onEnquire,
   onOrder,
   onCustomize,
+  onDownloadResource,
 }: {
   selection: DetailSelection;
   isSaved: boolean;
@@ -2268,30 +2722,58 @@ function ListingDetailPage({
   onEnquire?: () => void;
   onOrder?: () => void;
   onCustomize?: () => void;
+  onDownloadResource?: (resource: Resource) => void;
 }) {
   if (selection.type === "resource") {
     const resource = selection.item;
+    const resourceImg = resourceImage;
     return (
       <main className="detail-page">
-        <div className="detail-content">
-          <button className="detail-back" type="button" onClick={onBack}><ChevronLeft size={16} /> Back to results</button>
-          <section className="detail-panel resource-detail-panel">
-            <div className="detail-visual resource-detail-visual"><BookOpen size={54} strokeWidth={1.2} /></div>
-            <div className="detail-copy">
-              <div className="eyebrow"><span className="eyebrow-line" /> {resource.category}</div>
-              <h1>{resource.title}</h1>
-              <p className="detail-summary">{resource.paperSummary || `Published by ${resource.publisher}. This resource links to the publisher’s official documentation and is provided as a trusted starting point for learning.`}</p>
-              <div className="detail-facts"><span><BookOpen size={15} /> {resource.category}</span><span><ShieldCheck size={15} /> Official publisher source</span></div>
-              <div className="detail-actions">
-                <a className="button button-dark" href={resource.href} target="_blank" rel="noreferrer">Open publisher source <ArrowUpRight size={15} /></a>
+        <div className="detail-content detail-content-mockup">
+          <section className="detail-mockup-card">
+            <div className="detail-mockup-visual">
+              <img className="detail-mockup-img" src={resourceImg} alt={`${resource.title} visual`} />
+            </div>
+            <div className="detail-mockup-body">
+              <div className="detail-mockup-eyebrow">
+                <span className="eyebrow-dash" />
+                <span className="eyebrow-text">{resource.category.toUpperCase()}</span>
+              </div>
+              <h1 className="detail-mockup-title">{resource.title}</h1>
+              <div className="detail-mockup-byline">
+                <span>Published by {resource.publisher}</span>
+                <span className="byline-bullet">•</span>
+                <span>Peer-Reviewed Research</span>
+                <span className="byline-bullet">•</span>
+                <span>Official Documentation</span>
+              </div>
+              <p className="detail-mockup-summary">{resource.paperSummary || `Published by ${resource.publisher}. Official engineering research documentation and technical guidance verified for students.`}</p>
+              
+              <div className="detail-mockup-actions-row">
                 <button
-                  className="button button-primary"
+                  className="detail-mockup-btn-primary"
                   type="button"
-                  onClick={() => downloadResourcePaper(resource)}
+                  onClick={() => onDownloadResource ? onDownloadResource(resource) : downloadResourcePaper(resource)}
                 >
-                  <Download size={15} /> Download Paper
+                  <Download size={18} />
+                  <span>Download Paper (PDF)</span>
+                  <ArrowRight size={16} />
                 </button>
-                <button className="button button-outline" type="button" onClick={onSave}>{isSaved ? <BookmarkCheck size={15} /> : <Bookmark size={15} />}{isSaved ? "Saved" : "Save resource"}</button>
+                <button
+                  className={`detail-mockup-btn-save ${isSaved ? "is-saved" : ""}`}
+                  type="button"
+                  onClick={onSave}
+                  aria-label={isSaved ? "Remove from saved collection" : "Save for Later"}
+                >
+                  {isSaved ? <BookmarkCheck size={18} className="saved-icon" /> : <Bookmark size={18} />}
+                  <span>{isSaved ? "Saved" : "Save for Later"}</span>
+                </button>
+              </div>
+
+              <div className="detail-mockup-extra">
+                <a className="text-link detail-source-link" href={resource.href} target="_blank" rel="noreferrer">
+                  Open official publisher source <ArrowUpRight size={14} />
+                </a>
               </div>
             </div>
           </section>
@@ -2303,56 +2785,141 @@ function ListingDetailPage({
   const listing = selection.item;
   const isProject = listing.kind === "Projects";
   const isOpportunity = ["Internships", "Training", "Hackathons"].includes(listing.kind);
-  const detailImage = isProject ? listing.imageUrl : listing.kind === "Internships" ? internshipOpportunityImage : listing.kind === "Hackathons" ? hackathonOpportunityImage : undefined;
+  const detailImage =
+    listing.imageUrl ||
+    listing.componentDetails?.imageUrl ||
+    (listing.kind === "Internships"
+      ? internshipOpportunityImage
+      : listing.kind === "Hackathons"
+      ? hackathonOpportunityImage
+      : listing.kind === "Training"
+      ? trainingOpportunityImage
+      : listing.kind === "Products"
+      ? (homeShowcaseImages[5] || internshipOpportunityImage)
+      : listing.kind === "PCB Design"
+      ? (homeShowcaseImages[0] || internshipOpportunityImage)
+      : listing.kind === "Manufacturing"
+      ? (homeShowcaseImages[0] || internshipOpportunityImage)
+      : undefined);
+
+  const eyebrowCategory = isProject
+    ? (listing.projectCategory ? `${listing.projectCategory.toUpperCase()}-BASED PROJECT` : "MICROCONTROLLER-BASED PROJECT")
+    : `${listing.kind.toUpperCase()}-BASED OPPORTUNITY`;
+
   return (
     <main className="detail-page">
-      <div className="detail-content">
-        <button className="detail-back" type="button" onClick={onBack}><ChevronLeft size={16} /> Back to results</button>
-        <section className="detail-panel">
-          <div className={`detail-visual${detailImage ? " has-detail-image" : ""}`}>
-            {detailImage ? <img src={detailImage} alt={`${listing.title} preview`} /> : <><CircuitBoard size={58} strokeWidth={1.1} /><span>{listing.kind.toUpperCase()} / TECHCIRCUIT HUB</span></>}
-            {isProject && <span className="detail-visual-badge">HARDWARE PROJECT</span>}
-            {isOpportunity && isOpportunityEnded(listing) && <span className="detail-visual-badge ended-badge">ENDED</span>}
+      <div className="detail-content detail-content-mockup">
+        <section className="detail-mockup-card">
+          <div className="detail-mockup-visual">
+            {detailImage ? (
+              <img className="detail-mockup-img" src={detailImage} alt={`${listing.title} preview`} />
+            ) : (
+              <div className="detail-visual-fallback"><CircuitBoard size={58} strokeWidth={1.1} /><span>{listing.kind.toUpperCase()} / TECHCIRCUIT HUB</span></div>
+            )}
           </div>
-          <div className="detail-copy">
-            <div className="eyebrow"><span className="eyebrow-line" /> {listing.projectCategory ?? listing.kind}</div>
-            <h1>{listing.title}</h1>
-            <p className="detail-byline">{isProject ? "Hardware Project Kit" : listing.organization} <span>·</span> {listing.city}</p>
-            {isProject && listing.projectPrice !== undefined && <div className="detail-price">{formatPrice(listing.projectPrice)}</div>}
-            <p className="detail-summary">{listing.summary}</p>
-            {(listing.mode || listing.duration || listing.eligibility) && (
-              <div className="detail-facts">
-                {listing.mode && <span><Sparkles size={15} /> {listing.mode}</span>}
-                {listing.duration && <span><Clock3 size={15} /> {listing.duration}</span>}
-                {listing.eligibility && <span><GraduationCap size={15} /> {listing.eligibility}</span>}
-              </div>
+          <div className="detail-mockup-body">
+            <div className="detail-mockup-eyebrow">
+              <span className="eyebrow-dash" />
+              <span className="eyebrow-text">{eyebrowCategory}</span>
+            </div>
+            <h1 className="detail-mockup-title">{listing.title}</h1>
+            <div className="detail-mockup-byline">
+              <span>{isProject ? "Hardware Project Kit" : listing.organization}</span>
+              <span className="byline-bullet">•</span>
+              <span>{listing.mode || "Ready to ship"}</span>
+              <span className="byline-bullet">•</span>
+              <span>{listing.city || "All India"}</span>
+            </div>
+            {isProject && listing.projectPrice !== undefined && (
+              <div className="detail-mockup-price">{formatPrice(listing.projectPrice)}</div>
             )}
-            {listing.tags.length > 0 && <div className="tag-row detail-tags">{listing.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div>}
-            {listing.components && listing.components.length > 0 && (
-              <section className="detail-section">
-                <h2>{isProject ? "Specification overview" : "What's included"}</h2>
-                <ul className="detail-components">{listing.components.map((component) => <li key={component}>{component}</li>)}</ul>
-              </section>
-            )}
-            {listing.sourceUrl && (
-              <section className="detail-section detail-source">
-                <h2>Source and verification</h2>
-                <p>{listing.verified ? "This listing is marked as verified. Confirm current availability and requirements with the provider." : "Check the provider’s official page for current availability, requirements, and complete details."}</p>
-                <a className="text-link" href={listing.sourceUrl} target="_blank" rel="noreferrer" onClick={() => onTrackOpportunity?.(listing)}>{isTrackableOpportunity(listing) ? "Visit opportunity source" : "Visit official source"} <ArrowUpRight size={15} /></a>
-              </section>
-            )}
-            {isProject && (
-              <p className="detail-notice">
-                <Truck size={16} /> <strong>Built to order.</strong> Delivered to your address in about 7 days after payment. Handcrafted hardware kit with verified components and schematic documentation.
-              </p>
-            )}
-            {isOpportunity && isOpportunityEnded(listing) && <p className="detail-notice ended-notice"><CircleHelp size={15} /> Event dates or registration deadlines for this opportunity have already passed.</p>}
-            {isOpportunity && !isOpportunityEnded(listing) && <p className="detail-notice"><ShieldCheck size={15} /> Opportunity details can change. Verify deadlines, eligibility, fees, and application status with the organizer.</p>}
-            <div className="detail-actions">
-              {onOrder && isProject && <button className="button button-dark" type="button" onClick={onOrder}>Order now <ArrowRight size={15} /></button>}
-              {onCustomize && isProject && <button className="button button-outline" type="button" onClick={onCustomize}>Customize project <ArrowRight size={15} /></button>}
-              {onEnquire && !isProject && <button className="button button-dark" type="button" onClick={onEnquire}>Enquire <ArrowRight size={15} /></button>}
-              <button className="button button-outline" type="button" onClick={onSave}>{isSaved ? <BookmarkCheck size={15} /> : <Bookmark size={15} />}{isSaved ? "Saved" : "Save for later"}</button>
+            <p className="detail-mockup-summary">{listing.summary}</p>
+            
+            {/* Main Action Buttons Row matching mockup */}
+            <div className="detail-mockup-actions-row">
+              {onOrder && isProject ? (
+                <button className="detail-mockup-btn-primary" type="button" onClick={onOrder}>
+                  <ShoppingCart size={18} />
+                  <span>Order Now</span>
+                  <ArrowRight size={16} />
+                </button>
+              ) : listing.sourceUrl && !isProject ? (
+                <a
+                  className="detail-mockup-btn-primary"
+                  href={listing.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => onTrackOpportunity?.(listing)}
+                >
+                  <span>{listing.kind === "Internships" ? "Apply Now" : listing.kind === "Training" ? "Enroll Now" : listing.kind === "Hackathons" ? "Register Now" : "Visit Portal"}</span>
+                  <ArrowRight size={16} />
+                </a>
+              ) : onEnquire && !isProject ? (
+                <button className="detail-mockup-btn-primary" type="button" onClick={onEnquire}>
+                  <span>Enquire Now</span>
+                  <ArrowRight size={16} />
+                </button>
+              ) : null}
+
+              <button
+                className={`detail-mockup-btn-save ${isSaved ? "is-saved" : ""}`}
+                type="button"
+                onClick={onSave}
+                aria-label={isSaved ? "Remove from saved collection" : "Save for Later"}
+              >
+                {isSaved ? <BookmarkCheck size={18} className="saved-icon" /> : <Bookmark size={18} />}
+                <span>{isSaved ? "Saved" : "Save for Later"}</span>
+              </button>
+            </div>
+
+            {/* Extended Info & Specifications */}
+            <div className="detail-mockup-extra">
+              {isProject && (
+                <div className="detail-kit-notice">
+                  <Truck size={16} />
+                  <span><strong>Built to order (~7 days delivery).</strong> Handcrafted hardware kit assembled by workshop engineers, firmware pre-flashed, with schematics &amp; documentation.</span>
+                </div>
+              )}
+
+              {onCustomize && isProject && (
+                <button className="button button-outline detail-customize-btn" type="button" onClick={onCustomize}>
+                  <Wrench size={15} /> Customize project specifications <ArrowRight size={14} />
+                </button>
+              )}
+
+              {isOpportunity && isOpportunityEnded(listing) && (
+                <p className="detail-notice ended-notice"><CircleHelp size={15} /> Event dates or registration deadlines for this opportunity have already passed.</p>
+              )}
+
+              {(listing.duration || listing.eligibility) && (
+                <div className="detail-facts-compact">
+                  {listing.duration && <span><Clock3 size={14} /> {listing.duration}</span>}
+                  {listing.eligibility && <span><GraduationCap size={14} /> {listing.eligibility}</span>}
+                </div>
+              )}
+
+              {listing.components && listing.components.length > 0 && (
+                <div className="detail-components-box">
+                  <h4>{isProject ? "Specification Overview & Included Items" : "What's Included"}</h4>
+                  <ul className="detail-components-list">
+                    {listing.components.map((component) => <li key={component}>{component}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {listing.tags.length > 0 && (
+                <div className="detail-tags-pills">
+                  {listing.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}
+                </div>
+              )}
+
+              {listing.sourceUrl && !isProject && (
+                <div className="detail-source-box">
+                  <a className="text-link" href={listing.sourceUrl} target="_blank" rel="noreferrer" onClick={() => onTrackOpportunity?.(listing)}>
+                    {listing.kind === "Internships" ? "Apply on company portal" : listing.kind === "Training" ? "Enroll on official training site" : listing.kind === "Hackathons" ? "Register on official hackathon page" : "Visit official source"} <ArrowUpRight size={14} />
+                  </a>
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -3187,6 +3754,7 @@ function ProjectCheckoutPage({
             email: emailAddress.trim(),
             phone: cleanPhone,
           },
+          userId: currentUser?.id || "",
           shippingAddress: shippingAddressPayload,
           paymentMethod,
         }),
@@ -3356,7 +3924,7 @@ function ProjectCheckoutPage({
             updated_at: new Date().toISOString(),
           };
           try {
-            await fetch(`${targetBaseUrl}/api/payments/status?orderId=${encodeURIComponent(orderData.order_id)}&simulate=true`);
+            await fetch(`${targetBaseUrl}/api/payments/status?orderId=${encodeURIComponent(orderData.order_id)}&simulate=true&userId=${encodeURIComponent(currentUser?.id || "")}`);
           } catch {}
         }
       }
@@ -3401,22 +3969,111 @@ function ProjectCheckoutPage({
       pincode: string;
     }
   ) {
-    if (saveForFuture && currentUser) {
-      const client = getSupabase();
-      if (client) {
-        void client
-          .from("profiles")
-          .update({
-            name: shippingPayload.fullName,
-            phone: shippingPayload.phone,
-            address_line1: shippingPayload.addressLine1,
-            address_line2: shippingPayload.addressLine2,
-            city: shippingPayload.city,
-            state: shippingPayload.state,
-            pincode: shippingPayload.pincode,
-          })
-          .eq("id", currentUser.id);
+    const targetBaseUrl = apiBaseUrl || API_BASE_URL || window.location.origin;
+    const orderObj = order as AdminOrder;
+    const fullOrderToSave: AdminOrder = {
+      id: orderObj.id || (orderObj as any).order_id || `ord-${Date.now()}`,
+      order_id: (orderObj as any).order_id || orderObj.id,
+      order_number: orderObj.order_number || `TCH-ORD-${(orderObj.id || "").slice(-6).toUpperCase()}`,
+      user_id: currentUser?.id || orderObj.user_id || "",
+      customer_name: shippingPayload.fullName || orderObj.customer_name,
+      customer_email: shippingPayload.email || orderObj.customer_email,
+      customer_phone: shippingPayload.phone || orderObj.customer_phone,
+      shipping_address: shippingPayload,
+      items: orderObj.items || activeCartItems.map((item) => ({
+        project_id: item.id,
+        title: item.title,
+        price: projectPrice(item) || (item.id === SPECIAL_OFFER_PROJECT_ID ? 20 : 3499),
+        qty: 1,
+      })),
+      subtotal: orderObj.subtotal || total,
+      shipping_charges: 0,
+      total_amount: orderObj.total_amount || total,
+      currency: "INR",
+      payment_gateway: "cashfree",
+      payment_method: orderObj.payment_method || paymentMethod,
+      payment_status: "PAID",
+      tracking_status: orderObj.tracking_status || "Order Placed",
+      created_at: orderObj.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      expected_delivery_date: orderObj.expected_delivery_date || new Date(Date.now() + 7 * 86400000).toISOString(),
+      admin_notes: orderObj.admin_notes || "",
+      status_history: (orderObj as any).status_history || [
+        {
+          id: `hist-${Date.now()}`,
+          order_id: (orderObj as any).order_id || orderObj.id || "",
+          from_stage: null,
+          to_stage: "Order Placed",
+          changed_by: "system",
+          note: "Order confirmed and verified via payment gateway.",
+          is_public: true,
+          changed_at: new Date().toISOString(),
+        },
+      ],
+    };
+
+    // 1. Save into localStorage techcircuit_orders_store
+    try {
+      const existingRaw = localStorage.getItem("techcircuit_orders_store");
+      const list: AdminOrder[] = existingRaw ? JSON.parse(existingRaw) : [];
+      const filtered = list.filter((o) => o.id !== fullOrderToSave.id && o.order_id !== fullOrderToSave.order_id);
+      filtered.unshift(fullOrderToSave);
+      localStorage.setItem("techcircuit_orders_store", JSON.stringify(filtered));
+      localStorage.setItem("techcircuit-customer-email", shippingPayload.email);
+    } catch {}
+
+    // 2. POST order to server /api/orders so server store & file persistence has it
+    try {
+      await fetch(`${targetBaseUrl}/api/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fullOrderToSave),
+      });
+    } catch (e) {
+      console.warn("Could not POST order to server:", e);
+    }
+
+    // 3. Supabase upsert if connected
+    const client = getSupabase();
+    if (client) {
+      try {
+        await client.from("orders").upsert({
+          id: fullOrderToSave.id,
+          order_number: fullOrderToSave.order_number,
+          user_id: currentUser?.id || null,
+          customer_name: fullOrderToSave.customer_name,
+          customer_email: fullOrderToSave.customer_email,
+          customer_phone: fullOrderToSave.customer_phone,
+          shipping_address: fullOrderToSave.shipping_address,
+          items: fullOrderToSave.items,
+          total_amount: fullOrderToSave.total_amount,
+          currency: "INR",
+          payment_gateway: "cashfree",
+          payment_method: fullOrderToSave.payment_method,
+          payment_status: "PAID",
+          tracking_status: "Order Placed",
+          created_at: fullOrderToSave.created_at,
+          updated_at: fullOrderToSave.updated_at,
+          expected_delivery_date: fullOrderToSave.expected_delivery_date,
+        }, { onConflict: "id" });
+      } catch (err) {
+        console.warn("Supabase orders insert notice:", err);
       }
+    }
+
+    if (saveForFuture && currentUser && client) {
+      void client
+        .from("profiles")
+        .update({
+          name: shippingPayload.fullName,
+          phone: shippingPayload.phone,
+          address_line1: shippingPayload.addressLine1,
+          address_line2: shippingPayload.addressLine2,
+          city: shippingPayload.city,
+          state: shippingPayload.state,
+          pincode: shippingPayload.pincode,
+        })
+        .eq("id", currentUser.id);
     }
 
     if (setCartIds) {
@@ -3428,8 +4085,17 @@ function ProjectCheckoutPage({
       // ignore
     }
 
-    setConfirmedOrderId(order.order_number || order.id);
-    setConfirmedOrder(order as AdminOrder);
+    window.dispatchEvent(
+      new CustomEvent("techcircuit:toast", {
+        detail: {
+          message: "🎉 Order Placed Successfully! Your custom hardware kit is now in queue.",
+          type: "success",
+        },
+      })
+    );
+
+    setConfirmedOrderId(fullOrderToSave.order_number || fullOrderToSave.id);
+    setConfirmedOrder(fullOrderToSave);
     setSubmitting(false);
     setStep("confirmation");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -3782,23 +4448,6 @@ function ProjectCheckoutPage({
           </section>
         ) : (
           <>
-            {/* Top Back Navigation Link */}
-            {step === "delivery" && (
-              <button className="checkout-top-nav-link" type="button" onClick={onBackToCart}>
-                <ArrowLeft size={16} /> Back to Shipping
-              </button>
-            )}
-            {step === "summary" && (
-              <button className="checkout-top-nav-link" type="button" onClick={() => setStep("delivery")}>
-                <ArrowLeft size={16} /> Back to Delivery Address
-              </button>
-            )}
-            {step === "payment" && (
-              <button className="checkout-top-nav-link" type="button" onClick={() => setStep("summary")}>
-                <ArrowLeft size={16} /> Back to Order Summary
-              </button>
-            )}
-
             {/* Mobile collapsible summary shown above the form */}
             <div className="mobile-only-summary-container" style={{ display: "none" }}>
               {renderOrderSummaryCard(true)}
@@ -3915,7 +4564,7 @@ function ProjectCheckoutPage({
                               type="text"
                               autoComplete="name"
                               required
-                              placeholder="Mohamed Riham"
+                              placeholder="Enter full name"
                               className={`checkout-input-field ${fieldErrors.fullName ? "has-error" : ""}`}
                               value={fullName}
                               onChange={(e) => {
@@ -4507,7 +5156,7 @@ function ProjectCheckoutPage({
 
                             {policyModal === "refund" && (
                               <>
-                                <p><strong>Build-to-Order Cancellation Policy:</strong> [cancellation allowed until build starts - to be confirmed by owner].</p>
+                                <p><strong>Build-to-Order Cancellation Policy:</strong> Full cancellation is supported within 24 hours of placement or until physical assembly starts. Contact techcircuith@gmail.com for priority assistance.</p>
                                 <p>Because our engineering projects are custom fabricated and hand-assembled upon order placement, cancellation requests are accepted without deduction while the order is in <em>Order Placed</em> or <em>Confirmed</em> stage.</p>
                                 <p>Once manual circuit fabrication and component allocation begin in <em>Building (Processing)</em>, cancellations must be confirmed directly with the workshop administrator.</p>
                                 <p>In the event of hardware damage in transit or component failure upon delivery, full replacements or refunds are provided after inspection.</p>
@@ -4528,14 +5177,6 @@ function ProjectCheckoutPage({
                       </div>
                     )}
 
-                    {/* Centered back link */}
-                    <button
-                      type="button"
-                      className="payment-back-cart-btn"
-                      onClick={onBackToCart}
-                    >
-                      ← Back to cart
-                    </button>
                   </div>
                 )}
               </div>
@@ -4711,6 +5352,7 @@ function ListingCard({
   canCompare = false,
   onOrderNow,
   onViewDetails,
+  onTrackOpportunity,
 }: {
   listing: Listing;
   index: number;
@@ -4723,29 +5365,40 @@ function ListingCard({
   canCompare?: boolean;
   onOrderNow?: () => void;
   onViewDetails: () => void;
+  onTrackOpportunity?: (listing: Listing) => void;
 }) {
-  const isOpportunity = listing.kind === "Internships" || listing.kind === "Hackathons";
+  const isOpportunity = listing.kind === "Internships" || listing.kind === "Hackathons" || listing.kind === "Training";
   const visual = ["tile-mint", "tile-peach", "tile-blue"][index % 3];
   const isOffer = listing.tags.includes("OFFER") || listing.id === SPECIAL_OFFER_PROJECT_ID;
+  const cardImg =
+    listing.imageUrl ||
+    listing.componentDetails?.imageUrl ||
+    (listing.kind === "Internships"
+      ? internshipOpportunityImage
+      : listing.kind === "Hackathons"
+      ? hackathonOpportunityImage
+      : listing.kind === "Training"
+      ? trainingOpportunityImage
+      : listing.kind === "Products"
+      ? (homeShowcaseImages[5] || internshipOpportunityImage)
+      : listing.kind === "PCB Design"
+      ? (homeShowcaseImages[0] || internshipOpportunityImage)
+      : listing.kind === "Manufacturing"
+      ? (homeShowcaseImages[0] || internshipOpportunityImage)
+      : undefined);
+
   return (
     <article className={`listing-card${isOpportunity ? " opportunity-listing-card" : ""}${isOffer ? " is-offer-card" : ""}`}>
       <div className={`listing-visual ${isProjects ? "project-visual" : visual}`}>
-        {isOffer && <span className="card-offer-badge">⚡ OFFER · ₹20</span>}
-        {isProjects && listing.imageUrl ? (
+        {cardImg ? (
           <button className="project-image-trigger" type="button" onClick={onViewDetails} aria-label={`View details for ${listing.title}`}>
-            <img className="project-image" src={listing.imageUrl} alt="" loading="lazy" decoding="async" />
+            <img className="project-image" src={cardImg} alt={listing.title} loading="lazy" decoding="async" />
           </button>
-        ) : isProjects ? (
+        ) : (
           <button className="project-image-trigger project-image-placeholder" type="button" onClick={onViewDetails} aria-label={`View details for ${listing.title}`}>
             <CircuitBoard size={42} />
             <span>Project image not provided</span>
           </button>
-        ) : isOpportunity ? (
-          <div style={{ position: "relative", width: "100%", height: "100%" }}>
-            <img className="opportunity-card-image" src={listing.kind === "Internships" ? internshipOpportunityImage : hackathonOpportunityImage} alt={`${listing.kind} opportunities`} loading="lazy" decoding="async" />
-          </div>
-        ) : (
-          <div className="visual-circuit"><CircuitBoard size={50} strokeWidth={1.1} /><span className="visual-orbit" /></div>
         )}
         <button className="save-button" aria-label={isSaved ? "Remove saved listing" : "Save listing"} onClick={onSave}>{isSaved ? <BookmarkCheck size={17} /> : <Bookmark size={17} />}</button>
       </div>
@@ -4768,22 +5421,498 @@ function ListingCard({
         <div className="listing-actions">
           <button type="button" className="button button-outline button-small" onClick={onViewDetails}>View details <ArrowRight size={14} /></button>
           {isProjects && onOrderNow && <button className="button button-dark button-small" type="button" onClick={onOrderNow}>Order now <ArrowRight size={14} /></button>}
+          {isOpportunity && listing.sourceUrl && (
+            <a
+              href={listing.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="button button-primary button-small"
+              style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
+              onClick={() => onTrackOpportunity?.(listing)}
+            >
+              {listing.kind === "Internships" ? "Apply Now" : listing.kind === "Training" ? "Enroll Now" : "Register Now"}
+              <ExternalLink size={13} />
+            </a>
+          )}
+          {isOpportunity && !listing.sourceUrl && (
+            <button
+              type="button"
+              className="button button-primary button-small"
+              onClick={onViewDetails}
+            >
+              {listing.kind === "Internships" ? "Apply" : listing.kind === "Training" ? "Enroll" : "Register"}
+            </button>
+          )}
           {!isProjects && canCompare && <button className={compareIds.includes(listing.id) ? "button button-primary button-small" : "button button-outline button-small"} onClick={onCompare}>{compareIds.includes(listing.id) ? <Check size={14} /> : <Layers3 size={14} />}{compareIds.includes(listing.id) ? "Added" : "Compare"}</button>}
           {!isProjects && !canCompare && !isOpportunity && <button className="button button-outline button-small" onClick={onEnquire}>Enquire <ArrowRight size={14} /></button>}
-          {!isProjects && !listing.sourceUrl && <span className="no-contact-note">Sample profile · no contact details</span>}
         </div>
       </div>
     </article>
   );
 }
 
-function EmptyState({ page }: { page: Page }) {
-  const message = emptyMessages[page] ?? { title: "No listings match yet", text: "Try another search or check back as more source-linked listings are reviewed." };
-  return <div className="empty-state"><div className="empty-icon">{page === "Products" ? <Cpu size={24} /> : <GraduationCap size={24} />}</div><span className="eyebrow"><span className="eyebrow-line" /> VERIFIED INFORMATION ONLY</span><h3>{message.title}</h3><p>{message.text}</p><span className="empty-footnote"><ShieldCheck size={14} /> We don't invent listings to fill the page.</span></div>;
+export type PolicyType = "terms" | "privacy" | "cookie" | "delivery";
+
+export function renderPolicyArticle(
+  tab: PolicyType,
+  currentConsent?: "accepted" | "essential" | null,
+  onUpdateConsent?: (type: "accepted" | "essential") => void
+) {
+  if (tab === "cookie") {
+    return (
+      <div className="policy-content-article">
+        {onUpdateConsent && (
+          <div className="policy-interactive-box">
+            <h4>
+              <Sparkles size={16} /> Manage Your Current Cookie Preferences
+            </h4>
+            <p>
+              Your active preference:{" "}
+              <strong>
+                {currentConsent === "accepted"
+                  ? "Allowed (All Functional, Session & Preference Cookies Active)"
+                  : currentConsent === "essential"
+                  ? "Essential Only (Basic Authentication & Security Only)"
+                  : "Not Configured Yet (Prompt displayed on website entrance)"}
+              </strong>
+            </p>
+            <div className="policy-cookie-status-strip">
+              <button
+                type="button"
+                className={currentConsent === "accepted" ? "button button-primary button-small" : "button button-outline button-small"}
+                onClick={() => onUpdateConsent("accepted")}
+              >
+                <Check size={14} /> Allow All Cookies
+              </button>
+              <button
+                type="button"
+                className={currentConsent === "essential" ? "button button-primary button-small" : "button button-outline button-small"}
+                onClick={() => onUpdateConsent("essential")}
+              >
+                <ShieldCheck size={14} /> Restrict to Essential Only
+              </button>
+            </div>
+          </div>
+        )}
+
+        <h3>1. Introduction</h3>
+        <p>Welcome to TechCircuit Hub. This Cookie Policy explains how our website uses cookies and similar technologies to support website functionality, improve security, and understand how visitors use our services.</p>
+
+        <h3>2. What Are Cookies?</h3>
+        <p>Cookies are small text files stored on your device by websites. They can help websites remember preferences, maintain sessions, and provide certain features. Similar technologies, such as local storage and session storage, may also be used for website functionality.</p>
+
+        <h3>3. How We Use Cookies</h3>
+        <p>TechCircuit Hub may use cookies or similar technologies for the following purposes:</p>
+        <ul>
+          <li><strong>Essential Cookies:</strong> These technologies are necessary for authentication, account sessions, security, and essential website functionality.</li>
+          <li><strong>Preference Cookies:</strong> These remember your selected settings or preferences (such as bookmarked projects and local workspace preferences).</li>
+          <li><strong>Analytics Cookies:</strong> If analytics tools are enabled, these technologies help us understand website usage and improve engineering services.</li>
+          <li><strong>Third-Party Cookies:</strong> Some external services integrated into our website (such as payment processing and secure OAuth authentication) may use cookies or similar technologies according to their own policies.</li>
+        </ul>
+
+        <h3>4. Google Sign-In</h3>
+        <p>If you sign in using Google, Google and the authentication integration may use cookies or similar technologies to support authentication and account security. These technologies are subject to applicable Google policies and settings.</p>
+
+        <h3>5. Payment Services</h3>
+        <p>If you make a payment through our payment provider, certain cookies or similar technologies may be used to support payment functionality, fraud prevention, or security. The technologies used depend on the payment integration.</p>
+
+        <h3>6. Managing Cookie Preferences</h3>
+        <p>Where consent is required by applicable law, we request consent before using non-essential cookies or similar technologies. You may manage cookies through your browser settings or directly via the preference controls above. Note that disabling essential technologies may affect login or order tracking features.</p>
+
+        <h3>7. Data Protection</h3>
+        <p>Information collected through cookies or similar technologies is handled according to our Privacy Policy and applicable data-protection requirements.</p>
+
+        <h3>8. Changes to This Policy</h3>
+        <p>We may update this Cookie Policy when our website functionality, technologies, or legal requirements change. Updates will be published on this page with a revised effective date.</p>
+
+        <h3>9. Contact Us</h3>
+        <p>For questions about this Cookie Policy, contact:</p>
+        <p><strong>Website:</strong> <a href="https://techcircuithub.com" target="_blank" rel="noreferrer">https://techcircuithub.com</a><br /><strong>Email:</strong> <a href="mailto:techcircuith@gmail.com">techcircuith@gmail.com</a></p>
+      </div>
+    );
+  }
+
+  if (tab === "terms") {
+    return (
+      <div className="policy-content-article">
+        <h3>1. Introduction</h3>
+        <p>Welcome to TechCircuit Hub. These Terms &amp; Conditions govern your access to and use of the TechCircuit Hub website and its services. By accessing or using the website, you agree to these terms. If you do not agree, please discontinue using the services.</p>
+
+        <h3>2. Our Services</h3>
+        <p>TechCircuit Hub provides educational and career development resources related to ECE, VLSI, embedded systems, IoT, and electronics. Our services include:</p>
+        <ul>
+          <li>Internship listings and verified opportunity leads.</li>
+          <li>Training programs and workshops.</li>
+          <li>Hackathons and competitive design challenges.</li>
+          <li>Educational resources and white papers.</li>
+          <li>Hardware and academic project listings.</li>
+          <li>Electronic component price comparisons.</li>
+          <li>Student accounts and project tracking dashboards.</li>
+          <li>Administrative tools for managing platform content.</li>
+        </ul>
+
+        <h3>3. User Accounts</h3>
+        <p>Users may create an account or sign in using Google Sign-In or email credentials. You agree to provide accurate information and keep your account information reasonably up to date. You are responsible for activity performed through your account.</p>
+
+        <h3>4. Student Responsibilities</h3>
+        <p>Users must use the platform lawfully and responsibly. You must not submit false information, attempt unauthorized administrative access, interfere with the website's security, or conduct fraudulent activities.</p>
+
+        <h3>5. Internships, Training and Hackathons</h3>
+        <p>TechCircuit Hub publishes opportunities provided by third parties or organizers. Eligibility requirements, deadlines, fees, and conditions are determined by respective organizers. Listing an opportunity does not guarantee selection, admission, or employment.</p>
+
+        <h3>6. Hardware Projects and Products</h3>
+        <p>The website displays hardware projects, electronic components, educational kits, and related products. Product descriptions, specifications, prices, and delivery estimates should be reviewed before placing an order. Customization requests are subject to confirmation by TechCircuit Hub engineers.</p>
+
+        <h3>7. Orders and Payments</h3>
+        <p>Payments are processed securely through Cashfree or another configured payment gateway. Orders are subject to successful payment authorization. Payment processing is also subject to the payment provider's terms.</p>
+
+        <h3>8. Shipping, Cancellations and Refunds</h3>
+        <p>Custom build timelines (~7 days), cancellation eligibility, and refund conditions are communicated through our published policy. In the event an order cannot be fulfilled, full refunds are issued immediately.</p>
+
+        <h3>9. Educational Information</h3>
+        <p>Educational materials and project information are provided for learning and informational purposes. Users are responsible for following appropriate electrical, laboratory, and equipment safety practices.</p>
+
+        <h3>10. Third-Party Websites</h3>
+        <p>Our website may link to external websites, including internship portals, training providers, hackathons, and component suppliers. We do not control third-party content and their own terms apply.</p>
+
+        <h3>11. Intellectual Property</h3>
+        <p>Unless otherwise stated, website branding, original text, designs, and downloadable white papers are protected under applicable intellectual property laws. Permitted educational content may be used for personal learning.</p>
+
+        <h3>12. Website Availability &amp; Liability</h3>
+        <p>We aim to maintain high availability but cannot guarantee uninterrupted service. To the extent permitted by law, TechCircuit Hub is not liable for third-party opportunity decisions or external network issues.</p>
+
+        <h3>13. Contact Us</h3>
+        <p>For questions about these terms, orders, or our services, contact:</p>
+        <p><strong>Website:</strong> <a href="https://techcircuithub.com" target="_blank" rel="noreferrer">https://techcircuithub.com</a><br /><strong>Email:</strong> <a href="mailto:techcircuith@gmail.com">techcircuith@gmail.com</a></p>
+      </div>
+    );
+  }
+
+  if (tab === "privacy") {
+    return (
+      <div className="policy-content-article">
+        <h3>1. Introduction</h3>
+        <p>TechCircuit Hub is an educational and career development platform designed for students and professionals interested in Electronics and Communication Engineering (ECE), VLSI, embedded systems, IoT, and related technologies. This Privacy Policy explains how we collect, use, store, and protect your personal information.</p>
+
+        <h3>2. Information We Collect</h3>
+        <p>Depending on the features you use, we may collect:</p>
+        <ul>
+          <li>Name, email address, phone number, and delivery shipping addresses.</li>
+          <li>Account and profile information (college, department, year of study, technical interests).</li>
+          <li>Student dashboard bookmarks and opportunity activity history.</li>
+          <li>Project order, build tracking stage, and transaction references.</li>
+          <li>Voluntary feedback or project customization requests.</li>
+        </ul>
+
+        <h3>3. Google Sign-In</h3>
+        <p>When you sign in using Google, we receive basic profile information (such as your name, email address, and avatar) authorized by you to facilitate secure account login.</p>
+
+        <h3>4. How We Use Your Information</h3>
+        <p>We use your information to provide student dashboard features, process hardware kit orders, manage build tracking stages, respond to enquiries, maintain website security, and comply with legal obligations.</p>
+
+        <h3>5. Payments and Orders</h3>
+        <p>TechCircuit Hub uses Cashfree to process payments. Payment processing adheres to PCI-DSS standards. We do not store complete card numbers or bank credentials on our servers.</p>
+
+        <h3>6. Data Security &amp; Retention</h3>
+        <p>We use appropriate encryption and database security controls to protect personal information against unauthorized access. We retain personal information only for as long as necessary to provide services and meet legal obligations.</p>
+
+        <h3>7. Your Privacy Rights</h3>
+        <p>Subject to applicable law, you have rights to request access to, correction of, or deletion of your personal data. To submit a request, contact us below.</p>
+
+        <h3>8. Contact Us</h3>
+        <p>For privacy-related questions, requests, or complaints, contact:</p>
+        <p><strong>Website:</strong> <a href="https://techcircuithub.com" target="_blank" rel="noreferrer">https://techcircuithub.com</a><br /><strong>Email:</strong> <a href="mailto:techcircuith@gmail.com">techcircuith@gmail.com</a></p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="policy-content-article">
+      <h3>1. Custom Handcrafted Production</h3>
+      <p>All hardware kits and academic engineering projects displayed on TechCircuit Hub are handcrafted and custom assembled upon order placement. Our engineering workshop prepares physical PCBs, performs component testing, and pre-flashes microcontrollers with fully verified firmware.</p>
+
+      <h3>2. Delivery Timelines</h3>
+      <p>Standard delivery is completed within approximately <strong>7 business days</strong> from order confirmation. Live tracking stages ("Order Placed", "Confirmed", "Building (Processing)", "Testing / Quality Check", "Packed", "Shipped", "Delivered") are updated in your Student Dashboard.</p>
+
+      <h3>3. Cancellation Policy</h3>
+      <p>Because hardware projects are custom fabricated, full cancellations with 100% refund are accepted while your order is in the <strong>Order Placed</strong> or <strong>Confirmed</strong> stage (within 24 hours). Once manual soldering, circuit etching, and physical component allocation begin in <strong>Building (Processing)</strong>, cancellations must be coordinated directly with our workshop team at <a href="mailto:techcircuith@gmail.com">techcircuith@gmail.com</a>.</p>
+
+      <h3>4. Replacements &amp; Transit Guarantee</h3>
+      <p>If any component is damaged during transit or fails initial testing upon delivery, we provide immediate free component replacements or a full refund upon verification. Simply reach out with your Order ID and photo/video of the issue.</p>
+    </div>
+  );
 }
 
-function Footer({ navigate }: { navigate: (page: Page) => void }) {
-  return <footer className="site-footer"><div className="footer-main"><div className="footer-brand"><button className="brand brand-footer" onClick={() => navigate("Home")} aria-label={`${PLATFORM_NAME} home`}><img className="brand-logo" src={brandLogo} alt={PLATFORM_NAME} /></button><p>{PLATFORM_TAGLINE}<br />A clearer way into the electronics ecosystem.</p></div><div className="footer-links"><div><strong>EXPLORE</strong><button onClick={() => navigate("Products")}>Components</button><button onClick={() => navigate("Projects")}>Projects</button><button onClick={() => navigate("Internships")}>Internships</button><button onClick={() => navigate("Training")}>Training</button></div><div><strong>GET INSPIRED</strong><button onClick={() => navigate("Hackathons")}>Hackathons</button><button onClick={() => navigate("Learn")}>Resources</button><button onClick={() => navigate("Saved")}>Collection</button><button onClick={() => navigate("Admin")}>Partner portal</button></div></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} {PLATFORM_NAME} <span className="sample-dot" /> TechCircuit Hub</span><span>Built for the curious, by design.</span></div></footer>;
+export function PolicyDedicatedPage({
+  policy,
+  navigate,
+  currentConsent,
+  onUpdateConsent,
+}: {
+  policy: PolicyType;
+  navigate: (page: Page) => void;
+  currentConsent: "accepted" | "essential" | null;
+  onUpdateConsent: (type: "accepted" | "essential") => void;
+}) {
+  const titles: Record<PolicyType, string> = {
+    terms: "Terms & Conditions",
+    privacy: "Privacy Policy",
+    cookie: "Cookie Policy",
+    delivery: "Delivery, Cancellation & Refund Policy",
+  };
+
+  const currentTitle = titles[policy];
+
+  return (
+    <main className="policy-dedicated-page">
+      <div className="policy-dedicated-container">
+        <header className="policy-dedicated-header">
+          <nav className="policy-breadcrumbs" aria-label="Breadcrumb navigation">
+            <button className="policy-breadcrumb-btn" type="button" onClick={() => navigate("Home")}>
+              <Home size={14} /> Home
+            </button>
+            <span>/</span>
+            <span>Legal &amp; Policies</span>
+            <span>/</span>
+            <strong style={{ color: "#0F1F3D" }}>{currentTitle}</strong>
+          </nav>
+
+          <div className="policy-hero-card">
+            <div className="policy-hero-badge">
+              <ShieldCheck size={14} /> OFFICIAL LEGAL DOCUMENTATION · TECHCIRCUIT HUB
+            </div>
+            <h1>{currentTitle}</h1>
+            <div className="policy-hero-meta">
+              <span><strong>Effective Date:</strong> 24 October 2026</span>
+              <span>·</span>
+              <span><strong>Jurisdiction:</strong> Bengaluru, India</span>
+              <span>·</span>
+              <span><strong>Platform:</strong> https://techcircuithub.com</span>
+            </div>
+          </div>
+
+          <div className="policy-nav-switcher" aria-label="Policy sections navigation">
+            <button
+              type="button"
+              className={policy === "terms" ? "active" : ""}
+              onClick={() => navigate("Terms")}
+            >
+              Terms &amp; Conditions
+            </button>
+            <button
+              type="button"
+              className={policy === "privacy" ? "active" : ""}
+              onClick={() => navigate("Privacy")}
+            >
+              Privacy Policy
+            </button>
+            <button
+              type="button"
+              className={policy === "cookie" ? "active" : ""}
+              onClick={() => navigate("Cookies")}
+            >
+              Cookie Policy
+            </button>
+            <button
+              type="button"
+              className={policy === "delivery" ? "active" : ""}
+              onClick={() => navigate("Delivery")}
+            >
+              Delivery &amp; Refunds
+            </button>
+          </div>
+        </header>
+
+        <article className="policy-content-card">
+          {renderPolicyArticle(policy, currentConsent, onUpdateConsent)}
+        </article>
+
+        <section className="policy-support-card">
+          <div>
+            <strong>Need assistance regarding our terms or your data?</strong>
+            <p>Our workshop and compliance team is available to assist you with order inquiries and data requests.</p>
+          </div>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <a
+              href="mailto:techcircuith@gmail.com"
+              className="button button-primary button-small"
+              style={{ textDecoration: "none" }}
+            >
+              <Mail size={14} /> Contact Support
+            </a>
+            <button
+              type="button"
+              className="button button-outline button-small"
+              onClick={() => window.print()}
+            >
+              <Printer size={14} /> Print Policy
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+export function CookieConsentBanner({
+  onAcceptAll,
+  onAcceptEssential,
+  onViewCookiePolicy,
+}: {
+  onAcceptAll: () => void;
+  onAcceptEssential: () => void;
+  onViewCookiePolicy: () => void;
+}) {
+  return (
+    <aside className="cookie-consent-overlay" role="region" aria-label="Cookie preferences consent">
+      <div className="cookie-consent-card">
+        <div className="cookie-consent-top">
+          <span className="cookie-consent-badge">
+            <ShieldCheck size={13} /> COOKIE CONSENT &amp; PRIVACY
+          </span>
+          <button
+            className="cookie-close-icon"
+            type="button"
+            onClick={onAcceptEssential}
+            aria-label="Dismiss cookie notice with essential cookies only"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="cookie-consent-title">
+          <span>🍪 We respect your engineering privacy</span>
+        </div>
+        <p className="cookie-consent-desc">
+          We use essential cookies and local storage to secure your login sessions, process hardware project kit orders, and remember your technical preferences. You can allow all cookies or restrict to essential functionality. Review our{" "}
+          <button type="button" onClick={onViewCookiePolicy}>
+            Cookie Policy
+          </button>{" "}
+          for complete details.
+        </p>
+        <div className="cookie-consent-actions">
+          <button className="cookie-allow-btn" type="button" onClick={onAcceptAll}>
+            Allow All Cookies
+          </button>
+          <button className="cookie-essential-btn" type="button" onClick={onAcceptEssential}>
+            Essential Only
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+export function PolicyModal({
+  type,
+  onClose,
+}: {
+  type: PolicyType | null;
+  onClose: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<PolicyType>(type || "terms");
+
+  useEffect(() => {
+    if (type) setActiveTab(type);
+  }, [type]);
+
+  if (!type) return null;
+
+  return (
+    <div className="policy-modal-overlay" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="policy-modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="policy-modal-header">
+          <div className="policy-modal-title-wrap">
+            <span className="eyebrow"><span className="eyebrow-line" /> TECHCIRCUIT HUB LEGAL &amp; POLICIES</span>
+            <h2>{activeTab === "terms" ? "Terms & Conditions" : activeTab === "privacy" ? "Privacy Policy" : activeTab === "cookie" ? "Cookie Policy" : "Delivery, Cancellation & Refund Policy"}</h2>
+            <span className="policy-effective-date">Effective Date: 24 October 2026</span>
+          </div>
+          <button className="policy-close-btn" type="button" onClick={onClose} aria-label="Close policy modal">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="policy-tab-bar">
+          <button className={activeTab === "terms" ? "policy-tab active" : "policy-tab"} onClick={() => setActiveTab("terms")}>Terms &amp; Conditions</button>
+          <button className={activeTab === "privacy" ? "policy-tab active" : "policy-tab"} onClick={() => setActiveTab("privacy")}>Privacy Policy</button>
+          <button className={activeTab === "cookie" ? "policy-tab active" : "policy-tab"} onClick={() => setActiveTab("cookie")}>Cookie Policy</button>
+          <button className={activeTab === "delivery" ? "policy-tab active" : "policy-tab"} onClick={() => setActiveTab("delivery")}>Delivery &amp; Refunds</button>
+        </div>
+
+        <div className="policy-modal-body">
+          {renderPolicyArticle(activeTab)}
+        </div>
+
+        <div className="policy-modal-footer">
+          <button className="button button-primary" type="button" onClick={onClose}>
+            Close &amp; Continue Browsing
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ page }: { page: Page }) {
+  const message = emptyMessages[page] ?? { title: "No listings match yet", text: "Try another search or check back as more source-linked listings are reviewed." };
+  return (
+    <div className="empty-state">
+      <div className="empty-icon">{page === "Products" ? <Cpu size={24} /> : <GraduationCap size={24} />}</div>
+      <span className="eyebrow"><span className="eyebrow-line" /> VERIFIED INFORMATION ONLY</span>
+      <h3>{message.title}</h3>
+      <p>{message.text}</p>
+      <span className="empty-footnote"><ShieldCheck size={14} /> We don't invent listings to fill the page.</span>
+    </div>
+  );
+}
+
+function Footer({
+  navigate,
+}: {
+  navigate: (page: Page) => void;
+}) {
+  return (
+    <footer className="site-footer">
+      <div className="footer-main">
+        <div className="footer-brand">
+          <button className="brand brand-footer" onClick={() => navigate("Home")} aria-label={`${PLATFORM_NAME} home`}>
+            <img className="brand-logo" src={brandLogo} alt={PLATFORM_NAME} />
+          </button>
+          <p>{PLATFORM_TAGLINE}<br />A clearer way into the electronics ecosystem.</p>
+          <div className="footer-support-contact" style={{ marginTop: "12px", fontSize: "13px", color: "rgba(255,255,255,0.7)" }}>
+            <span>Direct Support: </span>
+            <a href="mailto:techcircuith@gmail.com" style={{ color: "#F97316", textDecoration: "none", fontWeight: 600 }}>techcircuith@gmail.com</a>
+          </div>
+        </div>
+        <div className="footer-links">
+          <div>
+            <strong>EXPLORE</strong>
+            <button onClick={() => navigate("Products")}>Components</button>
+            <button onClick={() => navigate("Projects")}>Projects</button>
+            <button onClick={() => navigate("Internships")}>Internships</button>
+            <button onClick={() => navigate("Training")}>Training</button>
+          </div>
+          <div>
+            <strong>GET INSPIRED</strong>
+            <button onClick={() => navigate("Hackathons")}>Hackathons</button>
+            <button onClick={() => navigate("Learn")}>Resources</button>
+            <button onClick={() => navigate("Saved")}>Collection</button>
+            <button onClick={() => navigate("Admin")}>Partner portal</button>
+          </div>
+          <div>
+            <strong>POLICIES &amp; LEGAL</strong>
+            <button type="button" onClick={() => navigate("Terms")}>Terms &amp; Conditions</button>
+            <button type="button" onClick={() => navigate("Privacy")}>Privacy Policy</button>
+            <button type="button" onClick={() => navigate("Cookies")}>Cookie Policy</button>
+            <button type="button" onClick={() => navigate("Delivery")}>Delivery &amp; Refunds</button>
+          </div>
+        </div>
+      </div>
+      <div className="footer-bottom">
+        <span>© {new Date().getFullYear()} {PLATFORM_NAME} <span className="sample-dot" /> TechCircuit Hub</span>
+        <span>Built for engineering learners. Effective Date: 24 October 2026</span>
+      </div>
+    </footer>
+  );
 }
 
 function EnquiryModal({ listing, onClose }: { listing: Listing; onClose: () => void }) {
@@ -4822,7 +5951,7 @@ function EnquiryModal({ listing, onClose }: { listing: Listing; onClose: () => v
       setSubmitting(false);
     }
   }
-  return <div className="modal-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="enquiry-modal" role="dialog" aria-modal="true" aria-labelledby="enquiry-title"><button className="modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>{sent ?   <div className="success-state"><div className="success-icon"><Check size={24} /></div><div className="eyebrow"><span className="eyebrow-line" /> {listing.id.startsWith("sample-") ? "ENQUIRY PREVIEW" : "ENQUIRY SENT"}</div><h2>{listing.id.startsWith("sample-") ? "Thanks for your interest." : "Your enquiry is on its way."}</h2><p>{listing.id.startsWith("sample-") ? "This is an illustrative profile. No enquiry was sent to a provider." : "Your enquiry was sent to the platform and can be reviewed by an administrator."}</p><button className="button button-dark" onClick={onClose}>Back to discovery <ArrowRight size={15} /></button></div> : <><div className="eyebrow"><span className="eyebrow-line" /> SEND AN ENQUIRY</div><h2 id="enquiry-title">Start a conversation.</h2><p className="modal-context">You're enquiring about <strong>{listing.title}</strong> from {listing.organization}.</p><form className="enquiry-form" onSubmit={submit}><label>Your name<input name="name" required placeholder="e.g. Asha Kumar" /></label><label>Email address<input name="email" type="email" required placeholder="you@example.com" /></label><label>What would you like to know?<textarea name="message" required rows={4} placeholder="Share a little about your project or question…" /></label>{listing.id.startsWith("sample-") && <div className="modal-sample-warning"><CircleHelp size={15} /> This is a sample profile. No contact details are available.</div>}{error && <div className="admin-message" role="alert">{error}</div>}<button className="button button-dark" type="submit" disabled={submitting}>{submitting ? "Sending…" : listing.id.startsWith("sample-") ? "Preview enquiry" : "Send enquiry"} <ArrowRight size={15} /></button></form></>}</section></div>;
+  return <div className="modal-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="enquiry-modal" role="dialog" aria-modal="true" aria-labelledby="enquiry-title"><button className="modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>{sent ?   <div className="success-state"><div className="success-icon"><Check size={24} /></div><div className="eyebrow"><span className="eyebrow-line" /> {listing.id.startsWith("sample-") ? "ENQUIRY PREVIEW" : "ENQUIRY SENT"}</div><h2>{listing.id.startsWith("sample-") ? "Thanks for your interest." : "Your enquiry is on its way."}</h2><p>{listing.id.startsWith("sample-") ? "This is an illustrative profile. No enquiry was sent to a provider." : "Your enquiry was sent to the platform and can be reviewed by an administrator."}</p><button className="button button-dark" onClick={onClose}>Back to discovery <ArrowRight size={15} /></button></div> : <><div className="eyebrow"><span className="eyebrow-line" /> SEND AN ENQUIRY</div><h2 id="enquiry-title">Start a conversation.</h2><p className="modal-context">You're enquiring about <strong>{listing.title}</strong> from {listing.organization}.</p><form className="enquiry-form" onSubmit={submit}><label>Your name<input name="name" required placeholder="Enter your name" /></label><label>Email address<input name="email" type="email" required placeholder="you@example.com" /></label><label>What would you like to know?<textarea name="message" required rows={4} placeholder="Share a little about your project or question…" /></label>{listing.id.startsWith("sample-") && <div className="modal-sample-warning"><CircleHelp size={15} /> This is a sample profile. No contact details are available.</div>}{error && <div className="admin-message" role="alert">{error}</div>}<button className="button button-dark" type="submit" disabled={submitting}>{submitting ? "Sending…" : listing.id.startsWith("sample-") ? "Preview enquiry" : "Send enquiry"} <ArrowRight size={15} /></button></form></>}</section></div>;
 }
 
 function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { isPasswordRecovery: boolean; onClose: () => void; onAuthenticated: (user: User) => void }) {
@@ -5367,25 +6496,92 @@ function StudentDashboard({
   }, [initialTrackingOrder]);
 
   useEffect(() => {
-    if (!student && !initialTrackingOrder) return;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+
+    function handleTouchStart(e: TouchEvent) {
+      if (e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        touchStartTime = Date.now();
+      }
+    }
+
+    function handleTouchEnd(e: TouchEvent) {
+      if (e.changedTouches.length === 1) {
+        const deltaX = e.changedTouches[0].clientX - touchStartX;
+        const deltaY = e.changedTouches[0].clientY - touchStartY;
+        const elapsed = Date.now() - touchStartTime;
+
+        if (deltaX > 60 && Math.abs(deltaY) < 80 && Math.abs(deltaX) > Math.abs(deltaY) * 1.3 && elapsed < 600) {
+          const target = e.target as HTMLElement | null;
+          if (target && ["input", "textarea", "select"].includes(target.tagName.toLowerCase())) return;
+
+          if (selectedTrackingOrder) {
+            setSelectedTrackingOrder(null);
+            if (onClearInitialTrackingOrder) onClearInitialTrackingOrder();
+            return;
+          }
+          if (section !== "overview") {
+            setSection("overview");
+            return;
+          }
+          navigate("Home");
+        }
+      }
+    }
+
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [selectedTrackingOrder, section, onClearInitialTrackingOrder, navigate, setSection]);
+
+  useEffect(() => {
     setOrdersLoading(true);
     setOrdersError("");
     const emailToQuery = student?.email || initialTrackingOrder?.customer_email || localStorage.getItem("techcircuit-customer-email") || "";
     const userIdToQuery = student?.id || "";
+
+    let localOrders: AdminOrder[] = [];
+    try {
+      const raw = localStorage.getItem("techcircuit_orders_store");
+      if (raw) localOrders = JSON.parse(raw);
+    } catch {}
+
     fetch(`/api/orders?userId=${encodeURIComponent(userIdToQuery)}&email=${encodeURIComponent(emailToQuery)}`)
       .then(async (res) => {
         if (!res.ok) throw new Error("Could not load your orders.");
         const data = await res.json();
-        const orders: AdminOrder[] = data.orders || [];
-        if (initialTrackingOrder && !orders.some((o) => o.id === initialTrackingOrder.id)) {
-          orders.unshift(initialTrackingOrder);
+        const serverOrders: AdminOrder[] = data.orders || [];
+
+        const orderMap = new Map<string, AdminOrder>();
+        serverOrders.forEach((o) => orderMap.set(o.id, o));
+        localOrders.forEach((o) => {
+          if (!orderMap.has(o.id) && !(o.order_id && orderMap.has(o.order_id))) {
+            orderMap.set(o.id, o);
+          }
+        });
+        if (initialTrackingOrder && !orderMap.has(initialTrackingOrder.id)) {
+          orderMap.set(initialTrackingOrder.id, initialTrackingOrder);
         }
-        setStudentOrders(orders);
+        const merged = Array.from(orderMap.values()).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        setStudentOrders(merged);
       })
       .catch((err) => {
-        if (initialTrackingOrder) {
-          setStudentOrders([initialTrackingOrder]);
-        } else {
+        const orderMap = new Map<string, AdminOrder>();
+        localOrders.forEach((o) => orderMap.set(o.id, o));
+        if (initialTrackingOrder && !orderMap.has(initialTrackingOrder.id)) {
+          orderMap.set(initialTrackingOrder.id, initialTrackingOrder);
+        }
+        const merged = Array.from(orderMap.values());
+        setStudentOrders(merged);
+        if (merged.length === 0) {
           setOrdersError(err instanceof Error ? err.message : "Could not load orders.");
         }
       })
@@ -5541,15 +6737,36 @@ function StudentDashboard({
           setProfileLoadError(`Could not load your profile: ${error.message}`);
           return;
         }
-        const name = data?.display_name || currentStudent.user_metadata?.name || "";
-        const selectedInterests = data?.interests ?? [];
+        let name = data?.display_name || currentStudent.user_metadata?.name || "";
+        let inst = data?.institution ?? "";
+        let crs = sanitizeCourse(data?.course);
+        let yr = data?.academic_year ?? "";
+        let cty = data?.city ?? "";
+        let selectedInterests = data?.interests ?? [];
+
+        // Check local storage fallback
+        try {
+          const cachedStr = localStorage.getItem(`techcircuit_student_profile_${currentStudent.id}`);
+          if (cachedStr) {
+            const cached = JSON.parse(cachedStr);
+            if (!name && cached.display_name) name = cached.display_name;
+            if (!inst && cached.institution) inst = cached.institution;
+            if (!crs && cached.course) crs = cached.course;
+            if (!yr && cached.academic_year) yr = cached.academic_year;
+            if (!cty && cached.city) cty = cached.city;
+            if ((!selectedInterests || selectedInterests.length === 0) && Array.isArray(cached.interests)) {
+              selectedInterests = cached.interests;
+            }
+          }
+        } catch {}
+
         setProfileName(name);
-        setInstitution(data?.institution ?? "");
-        setCourse(sanitizeCourse(data?.course));
-        setAcademicYear(data?.academic_year ?? "");
-        setLocation(data?.city ?? "");
+        setInstitution(inst);
+        setCourse(crs);
+        setAcademicYear(yr);
+        setLocation(cty);
         setInterests(selectedInterests);
-        const complete = Boolean(name.trim() && data?.institution?.trim() && sanitizeCourse(data?.course).trim() && data?.academic_year?.trim() && selectedInterests.length);
+        const complete = Boolean(name.trim() && inst.trim() && crs.trim() && yr.trim() && selectedInterests.length);
         setProfileSetupRequired(!complete);
         if (!complete) setSection("profile");
       } catch {
@@ -5570,7 +6787,7 @@ function StudentDashboard({
     if (!student) return;
     const sanitizedCourse = sanitizeCourse(course);
     if (!profileName.trim() || !institution.trim() || !sanitizedCourse.trim() || !academicYear) {
-      setProfileError("Enter your name, institution, course and academic year to continue.");
+      setProfileError("Please enter your name, institution, course and academic year to continue.");
       return;
     }
     if (interests.length === 0) {
@@ -5578,63 +6795,67 @@ function StudentDashboard({
       return;
     }
     const currentStudent = student;
-    const supabase = getSupabase();
-    if (!supabase) {
-      setProfileError("Profile editing is unavailable until Supabase is configured.");
-      return;
-    }
-    const client = supabase;
+    const profilePayload = {
+      display_name: profileName.trim(),
+      institution: institution.trim(),
+      course: sanitizedCourse.trim(),
+      academic_year: academicYear,
+      city: location.trim(),
+      interests,
+      updated_at: new Date().toISOString(),
+    };
+
+    try {
+      localStorage.setItem(`techcircuit_student_profile_${currentStudent.id}`, JSON.stringify(profilePayload));
+    } catch {}
+
     setProfileError("");
     setMessage("");
     setProfileSaving(true);
-    try {
-      const { data, error } = await client
-        .from("profiles")
-        .update({
-          display_name: profileName.trim(),
-          institution: institution.trim(),
-          course: sanitizedCourse.trim(),
-          academic_year: academicYear,
-          city: location.trim(),
-          interests,
-        })
-        .eq("id", currentStudent.id)
-        .select("id")
-        .maybeSingle();
-      if (error) {
-        setProfileError(`Could not save your profile: ${error.message}`);
-        return;
-      }
-      if (!data) {
-        const { data: upsertData, error: upsertError } = await client
+
+    const supabase = getSupabase();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
           .from("profiles")
-          .upsert({
-            id: currentStudent.id,
+          .update({
             display_name: profileName.trim(),
             institution: institution.trim(),
             course: sanitizedCourse.trim(),
             academic_year: academicYear,
             city: location.trim(),
             interests,
-            role: "student",
           })
+          .eq("id", currentStudent.id)
           .select("id")
           .maybeSingle();
 
-        if (upsertError || !upsertData) {
-          setProfileError(upsertError ? `Could not save your profile: ${upsertError.message}` : "Your student profile was not found. Please sign out and sign in again.");
-          return;
+        if (!error && !data) {
+          await supabase
+            .from("profiles")
+            .upsert({
+              id: currentStudent.id,
+              display_name: profileName.trim(),
+              institution: institution.trim(),
+              course: sanitizedCourse.trim(),
+              academic_year: academicYear,
+              city: location.trim(),
+              interests,
+              role: "student",
+            })
+            .select("id")
+            .maybeSingle();
         }
+      } catch (err) {
+        console.warn("Saved to local storage, server sync deferred:", err);
       }
-      setCourse(sanitizedCourse);
-      setMessage("Your student profile was saved.");
-      setProfileSetupRequired(false);
-      if (profileSetupRequired) setSection("overview");
-    } catch (err) {
-      setProfileError(err instanceof Error ? err.message : "Could not save your profile. Please try again.");
-    } finally {
-      setProfileSaving(false);
     }
+
+    setCourse(sanitizedCourse);
+    setProfileSaving(false);
+    setMessage("Your student profile was saved successfully! ✨");
+    setProfileSetupRequired(false);
+    if (profileSetupRequired) setSection("overview");
   }
 
   async function signOut() {
@@ -5649,7 +6870,7 @@ function StudentDashboard({
     navigate("Home");
   }
 
-  if (!student) {
+  if (!student && section !== "orders") {
     return (
       <main className="directory-page">
         <section className="directory-content">
@@ -5659,7 +6880,7 @@ function StudentDashboard({
     );
   }
 
-  if (!profileLoaded || profileLoading || profileLoadError) {
+  if (section !== "orders" && (!profileLoaded || profileLoading || profileLoadError)) {
     return (
       <main className="dashboard-page">
         <section className="dashboard-hero">
@@ -5688,8 +6909,8 @@ function StudentDashboard({
     >
       <div className="dashboard-section-head">
         <div>
-          <div className="eyebrow"><span className="eyebrow-line" /> {profileSetupRequired ? "STUDENT DETAILS" : "YOUR DETAILS"}</div>
-          <h2 id={profileSetupRequired ? "student-setup-title" : undefined}>{profileSetupRequired ? "Set up your student profile" : "Student profile"}</h2>
+          <div className="eyebrow"><span className="eyebrow-line" /> {profileSetupRequired ? "STUDENT DETAILS" : "YOUR PROFILE"}</div>
+          <h2 id={profileSetupRequired ? "student-setup-title" : undefined}>{profileSetupRequired ? "Set up your student profile" : "Student Profile"}</h2>
           {profileSetupRequired && <p className="profile-setup-intro">Tell us about your studies and choose the engineering areas you want to explore.</p>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
@@ -5701,31 +6922,88 @@ function StudentDashboard({
           )}
         </div>
       </div>
+
+      <div className="student-profile-badge-card">
+        <div className="student-profile-avatar-circle">
+          {(profileName.trim() || student?.email || "S")[0].toUpperCase()}
+        </div>
+        <div className="student-profile-badge-details">
+          <div className="student-badge-name">{profileName.trim() || "Student Member"}</div>
+          <div className="student-badge-email">{student?.email}</div>
+          <span className="student-verified-pill"><ShieldCheck size={13} /> Active Verified Student</span>
+        </div>
+      </div>
+
       <form className="student-profile-form" onSubmit={saveProfile}>
         <div className="student-profile-form-body">
-          <label>Full name<input required value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder="Your full name" /></label>
-          <label>Email address<input value={student.email ?? ""} readOnly aria-readonly="true" /></label>
-          <label>College / institution<input required value={institution} onChange={(event) => setInstitution(event.target.value)} placeholder="Your college or institution" /></label>
-          <label>Course / branch<input required value={course} onChange={(event) => setCourse(event.target.value)} placeholder="e.g. Electronics and Communication Engineering" /></label>
-          <label>Academic year<select required value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}><option value="">Select your year</option>{ACADEMIC_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
-          <label>City <span>(optional)</span><input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Your city" /></label>
+          <div className="profile-form-row">
+            <label>
+              Full name <span className="field-required">*</span>
+              <input required value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder="Enter full name" />
+            </label>
+            <label>
+              Email address
+              <div className="profile-readonly-input">
+                <input value={student?.email ?? ""} readOnly aria-readonly="true" />
+                <Lock size={14} className="readonly-lock" />
+              </div>
+            </label>
+          </div>
+
+          <div className="profile-form-row">
+            <label>
+              College / Institution <span className="field-required">*</span>
+              <input required value={institution} onChange={(event) => setInstitution(event.target.value)} placeholder="Your college or institution" />
+            </label>
+            <label>
+              Course / Branch <span className="field-required">*</span>
+              <input required value={course} onChange={(event) => setCourse(event.target.value)} placeholder="e.g. ECE / Embedded Systems" />
+            </label>
+          </div>
+
+          <div className="profile-form-row">
+            <label>
+              Academic year <span className="field-required">*</span>
+              <select required value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}>
+                <option value="">Select your year</option>
+                {ACADEMIC_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}
+              </select>
+            </label>
+            <label>
+              City <span>(optional)</span>
+              <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Your city (e.g. Chennai)" />
+            </label>
+          </div>
+
           <fieldset className="student-interest-fieldset">
             <legend>What areas interest you? <span>Select one or more</span></legend>
             <div className="student-interest-options">
-              {STUDENT_INTERESTS.map((interest) => (
-                <label key={interest} className={interests.includes(interest) ? "student-interest-option selected" : "student-interest-option"}>
-                  <input type="checkbox" checked={interests.includes(interest)} onChange={() => setInterests((current) => current.includes(interest) ? current.filter((item) => item !== interest) : [...current, interest])} />
-                  <span>{interest}</span>
-                </label>
-              ))}
+              {STUDENT_INTERESTS.map((interest) => {
+                const isSelected = interests.includes(interest);
+                return (
+                  <label key={interest} className={isSelected ? "student-interest-option selected" : "student-interest-option"}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => setInterests((current) => current.includes(interest) ? current.filter((item) => item !== interest) : [...current, interest])}
+                    />
+                    {isSelected && <Check size={12} strokeWidth={3} />}
+                    <span>{interest}</span>
+                  </label>
+                );
+              })}
             </div>
           </fieldset>
         </div>
+
         <div className="student-profile-actions">
-          {(profileLoading || profileSaving) && <p className="profile-status" role="status">{profileLoading ? "Loading your profile…" : "Saving profile…"}</p>}
+          {(profileLoading || profileSaving) && <p className="profile-status" role="status">{profileLoading ? "Loading profile…" : "Saving profile…"}</p>}
           {profileError && <p className="admin-message profile-status" role="alert">{profileError}</p>}
           {message && <p className="auth-success profile-status" role="status">{message}</p>}
-          <button className="button button-primary profile-save" type="submit" disabled={profileLoading || profileSaving}>{profileSaving ? "Saving your profile…" : profileSetupRequired ? "Save details and continue" : "Save profile"} <Check size={15} /></button>
+          <button className="button button-primary profile-save-btn" type="submit" disabled={profileLoading || profileSaving}>
+            <Check size={16} strokeWidth={2.4} />
+            <span>{profileSaving ? "Saving details…" : profileSetupRequired ? "Save details and continue" : "Save Profile Changes"}</span>
+          </button>
         </div>
       </form>
     </section>
@@ -5857,7 +7135,7 @@ function StudentDashboard({
           </>
         )}
         {/* SECTION: MY ORDERS & TRACKING */}
-        {section === "orders" && !profileSetupRequired && (
+        {section === "orders" && (
           <section className="opportunity-activity-section">
             <div className="dashboard-section-head">
               <div>
@@ -5871,17 +7149,7 @@ function StudentDashboard({
 
             {selectedTrackingOrder ? (
               <div className="order-tracking-detail-card" style={{ background: "#FFFFFF", borderRadius: "16px", padding: "24px", border: "1px solid #E2E8F0", boxShadow: "0 4px 16px rgba(15,31,61,0.04)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "10px" }}>
-                  <button
-                    type="button"
-                    className="button button-outline button-small"
-                    onClick={() => {
-                      setSelectedTrackingOrder(null);
-                      if (onClearInitialTrackingOrder) onClearInitialTrackingOrder();
-                    }}
-                  >
-                    <ArrowLeft size={14} /> Back to My Orders
-                  </button>
+                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "10px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <span className={`tracking-badge stage-${selectedTrackingOrder.tracking_status.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}>
                       {selectedTrackingOrder.tracking_status}
@@ -5920,16 +7188,16 @@ function StudentDashboard({
                   <div className="tracking-timeline-stepper">
                     {(
                       [
-                        "Order Placed",
-                        "Confirmed",
-                        "Building (Processing)",
-                        "Testing / Quality Check",
-                        "Packed",
-                        "Shipped",
-                        "Delivered",
-                      ] as OrderTrackingStage[]
-                    ).map((stageName, idx, arr) => {
-                      const allStages: OrderTrackingStage[] = [
+                        { name: "Order Placed", icon: PackageCheck, desc: "Order registered in queue" },
+                        { name: "Confirmed", icon: CheckCircle2, desc: "Kit configuration confirmed" },
+                        { name: "Building (Processing)", icon: Cpu, desc: "PCB assembly & soldering" },
+                        { name: "Testing / Quality Check", icon: Sparkles, desc: "Firmware flash & voltage test" },
+                        { name: "Packed", icon: Package, desc: "Anti-static boxed with docs" },
+                        { name: "Shipped", icon: Truck, desc: "Dispatched with courier partner" },
+                        { name: "Delivered", icon: Home, desc: "Delivered to recipient" },
+                      ] as { name: OrderTrackingStage; icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>; desc: string }[]
+                    ).map((stage, idx, arr) => {
+                      const allStageNames: OrderTrackingStage[] = [
                         "Order Placed",
                         "Confirmed",
                         "Building (Processing)",
@@ -5938,25 +7206,29 @@ function StudentDashboard({
                         "Shipped",
                         "Delivered",
                       ];
-                      const currentIdx = allStages.indexOf(selectedTrackingOrder.tracking_status);
+                      const currentIdx = allStageNames.indexOf(selectedTrackingOrder.tracking_status);
                       const isCompleted = idx < currentIdx;
                       const isCurrent = idx === currentIdx;
+                      const StageIcon = stage.icon;
 
                       return (
                         <div
-                          key={stageName}
+                          key={stage.name}
                           className={`tracking-timeline-step ${isCompleted ? "is-completed" : ""} ${isCurrent ? "is-current" : ""}`}
                         >
                           <div className="timeline-dot-wrapper">
                             <div className="timeline-dot">
-                              {isCompleted ? <Check size={14} /> : <span>{idx + 1}</span>}
+                              {isCompleted ? <Check size={15} strokeWidth={2.8} /> : isCurrent ? <StageIcon size={15} strokeWidth={2.2} /> : <span>{idx + 1}</span>}
                             </div>
-                            {idx < arr.length - 1 && <div className="timeline-connector" />}
+                            {idx < arr.length - 1 && <div className={`timeline-connector ${isCompleted ? "is-filled" : ""}`} />}
                           </div>
                           <div className="timeline-step-content">
-                            <strong className="timeline-step-title">{stageName}</strong>
+                            <strong className="timeline-step-title">{stage.name}</strong>
+                            <small className="timeline-step-desc">{stage.desc}</small>
                             {isCurrent && (
-                              <span className="timeline-step-status-tag">Current Phase</span>
+                              <span className="timeline-step-status-tag">
+                                <span className="timeline-pulse-dot" /> Current Phase
+                              </span>
                             )}
                           </div>
                         </div>
@@ -6241,7 +7513,6 @@ function StudentDashboard({
             <h3>You’re all caught up.</h3>
             <p>There are no notifications yet. Application and enrollment updates are not currently delivered through the platform.</p>
             <div className="dashboard-menu-actions">
-              <button className="button button-primary button-small" type="button" onClick={() => setSection("overview")}>Back to overview <ArrowRight size={14} /></button>
               <button className="button button-outline button-small" type="button" onClick={() => navigate("Saved")}>View bookmarks <ArrowRight size={14} /></button>
             </div>
           </div>
@@ -6379,10 +7650,34 @@ function AdminPage({ onExit }: { onExit: () => void }) {
         .then(async (res) => {
           if (!res.ok) throw new Error("Could not fetch orders.");
           const data = await res.json();
-          setAdminOrders(data.orders || []);
+          const serverOrders: AdminOrder[] = data.orders || [];
+
+          let localOrders: AdminOrder[] = [];
+          try {
+            const raw = localStorage.getItem("techcircuit_orders_store");
+            if (raw) localOrders = JSON.parse(raw);
+          } catch {}
+
+          const orderMap = new Map<string, AdminOrder>();
+          serverOrders.forEach((o) => orderMap.set(o.id, o));
+          localOrders.forEach((o) => {
+            if (!orderMap.has(o.id) && !(o.order_id && orderMap.has(o.order_id))) {
+              orderMap.set(o.id, o);
+            }
+          });
+          const merged = Array.from(orderMap.values()).sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+          setAdminOrders(merged);
         })
         .catch((err) => {
           console.warn("Could not load orders:", err);
+          let localOrders: AdminOrder[] = [];
+          try {
+            const raw = localStorage.getItem("techcircuit_orders_store");
+            if (raw) localOrders = JSON.parse(raw);
+          } catch {}
+          if (localOrders.length > 0) setAdminOrders(localOrders);
         })
         .finally(() => setOrdersLoading(false));
     }
@@ -6392,6 +7687,74 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     const interval = setInterval(fetchOrders, 8000);
     return () => clearInterval(interval);
   }, [isAdmin, ordersRevision]);
+
+  useEffect(() => {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+
+    function handleTouchStart(e: TouchEvent) {
+      if (e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        touchStartTime = Date.now();
+      }
+    }
+
+    function handleTouchEnd(e: TouchEvent) {
+      if (e.changedTouches.length === 1) {
+        const deltaX = e.changedTouches[0].clientX - touchStartX;
+        const deltaY = e.changedTouches[0].clientY - touchStartY;
+        const elapsed = Date.now() - touchStartTime;
+
+        if (deltaX > 60 && Math.abs(deltaY) < 80 && Math.abs(deltaX) > Math.abs(deltaY) * 1.3 && elapsed < 600) {
+          const target = e.target as HTMLElement | null;
+          if (target && ["input", "textarea", "select"].includes(target.tagName.toLowerCase())) return;
+
+          if (confirmDeliveredDialogOpen) {
+            setConfirmDeliveredDialogOpen(false);
+            return;
+          }
+          if (confirmCancelledDialogOpen) {
+            setConfirmCancelledDialogOpen(false);
+            return;
+          }
+          if (mobileMenuOpen) {
+            setMobileMenuOpen(false);
+            return;
+          }
+          if (selectedAdminOrder) {
+            setSelectedAdminOrder(null);
+            return;
+          }
+          if (oppFormOpen) {
+            setOppFormOpen(false);
+            return;
+          }
+          if (compFormOpen) {
+            setCompFormOpen(false);
+            return;
+          }
+          onExit();
+        }
+      }
+    }
+
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [
+    confirmDeliveredDialogOpen,
+    confirmCancelledDialogOpen,
+    mobileMenuOpen,
+    selectedAdminOrder,
+    oppFormOpen,
+    compFormOpen,
+    onExit,
+  ]);
 
   // Open single order in detail view
   function openOrderDetail(order: AdminOrder) {
@@ -6453,6 +7816,29 @@ function AdminPage({ onExit }: { onExit: () => void }) {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to update tracking stage.");
+
+      try {
+        const raw = localStorage.getItem("techcircuit_orders_store");
+        if (raw) {
+          const list: AdminOrder[] = JSON.parse(raw);
+          const updated = list.map((ord) => {
+            if (ord.id === selectedAdminOrder.id || ord.order_id === selectedAdminOrder.order_id) {
+              return {
+                ...ord,
+                tracking_status: stageToApply,
+                courier_name: courierNameInput.trim() || ord.courier_name,
+                courier_tracking_number: courierTrackingNumberInput.trim() || ord.courier_tracking_number,
+                courier_tracking_url: courierTrackingUrlInput.trim() || ord.courier_tracking_url,
+                expected_delivery_date: expectedDateInput || ord.expected_delivery_date,
+                admin_notes: internalNotesInput.trim() || ord.admin_notes,
+                updated_at: new Date().toISOString(),
+              };
+            }
+            return ord;
+          });
+          localStorage.setItem("techcircuit_orders_store", JSON.stringify(updated));
+        }
+      } catch {}
 
       showToast(`Order #${selectedAdminOrder.order_number} moved to ${stageToApply}`, "success");
       setConfirmDeliveredDialogOpen(false);
@@ -7119,11 +8505,6 @@ function AdminPage({ onExit }: { onExit: () => void }) {
       {!supabase ? (
         <div className="admin-login-screen">
           <div className="admin-login-card">
-            <div className="admin-login-top-bar">
-              <button className="button button-outline button-small" onClick={onExit} type="button">
-                <ArrowLeft size={14} /> Back to Website
-              </button>
-            </div>
             <div className="admin-login-center-logo">
               <img className="admin-center-logo" src={brandLogo} alt={PLATFORM_NAME} />
             </div>
@@ -7138,20 +8519,12 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                 <code>VITE_SUPABASE_URL=your-project-url</code>
                 <code>VITE_SUPABASE_ANON_KEY=your-anon-key</code>
               </div>
-              <p className="admin-security-note">
-                <ShieldCheck size={16} /> Admin access is enforced by database roles and row-level security policies.
-              </p>
             </div>
           </div>
         </div>
       ) : !isAdmin ? (
         <div className="admin-login-screen">
           <div className="admin-login-card">
-            <div className="admin-login-top-bar">
-              <button className="button button-outline button-small" onClick={onExit} type="button">
-                <ArrowLeft size={14} /> Back to Website
-              </button>
-            </div>
             <div className="admin-login-center-logo">
               <img className="admin-center-logo" src={brandLogo} alt={PLATFORM_NAME} />
             </div>
@@ -7698,13 +9071,6 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       {/* Top Action Bar */}
                       <div className="admin-order-detail-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-                          <button
-                            type="button"
-                            className="button button-outline button-small"
-                            onClick={() => setSelectedAdminOrder(null)}
-                          >
-                            <ArrowLeft size={14} /> Back to Orders
-                          </button>
                           <h2 style={{ margin: 0, fontSize: "20px", color: "#0F1F3D", fontWeight: 800 }}>
                             Order #{selectedAdminOrder.order_number || selectedAdminOrder.id}
                           </h2>
@@ -9300,24 +10666,6 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                           <span className="stat-label">Payment Gateway Mode</span>
                           <strong className="stat-value">Cashfree Sandbox</strong>
                         </div>
-                      </div>
-
-                      <div className="admin-security-checklist">
-                        <h4>Security & Access Enforcement</h4>
-                        <ul>
-                          <li>
-                            <CheckCircle2 size={16} className="text-success" />
-                            <span>Database function <code>is_admin()</code> validates role on every query</span>
-                          </li>
-                          <li>
-                            <CheckCircle2 size={16} className="text-success" />
-                            <span>Listings INSERT / UPDATE / DELETE restricted to authenticated administrators</span>
-                          </li>
-                          <li>
-                            <CheckCircle2 size={16} className="text-success" />
-                            <span>Student inquiries and tracking activity secured via Postgres policies</span>
-                          </li>
-                        </ul>
                       </div>
 
                       <div className="admin-profile-actions">

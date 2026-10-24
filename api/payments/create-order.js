@@ -115,6 +115,49 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: cfData.message || "Could not initialize Cashfree payment." });
     }
 
+    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    if (supabaseUrl && supabaseKey) {
+      try {
+        await fetch(`${supabaseUrl}/rest/v1/orders`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            apikey: supabaseKey,
+            authorization: `Bearer ${supabaseKey}`,
+            prefer: "resolution=merge-duplicates,return=representation",
+          },
+          body: JSON.stringify({
+            id: internalOrderId,
+            order_number: orderNumber,
+            user_id: body.userId || null,
+            customer_name: customer.name.trim(),
+            customer_email: customer.email.trim().toLowerCase(),
+            customer_phone: cleanPhone,
+            shipping_address: addr,
+            items: projectIds.map((id, idx) => ({
+              project_id: id,
+              title: id === SPECIAL_OFFER_ID ? "Mini DC Motor & Fan Circuit Kit" : (body.projectTitles?.[idx] || "Hardware Project Kit"),
+              price: projectPrices[idx],
+              qty: 1,
+            })),
+            subtotal,
+            shipping_charges: shippingCharges,
+            total_amount: totalAmount,
+            currency: "INR",
+            payment_method: body?.paymentMethod === "upi" ? "upi" : "card",
+            payment_gateway: "cashfree",
+            cashfree_order_id: cashfreeOrderId,
+            payment_session_id: cfData.payment_session_id,
+            payment_status: "PENDING",
+            tracking_status: "Order Placed",
+          }),
+        });
+      } catch (sbErr) {
+        console.warn("Supabase order initial write error:", sbErr.message);
+      }
+    }
+
     return res.status(201).json({
       payment_session_id: cfData.payment_session_id,
       order_id: internalOrderId,
