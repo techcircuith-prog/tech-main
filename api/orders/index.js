@@ -1,3 +1,7 @@
+const FALLBACK_SUPABASE_URL = "https://zomwoprlbydezbbliyui.supabase.co";
+const FALLBACK_SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvbXdvcHJsYnlkZXpiYmxpeXVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4OTQ0MTEsImV4cCI6MjEwNzQ3MDQxMX0.ZsmboSVX_kN4J79tIbZBIbdFMIOijyhfqcayAbGHlt4";
+
 export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(204).end();
 
@@ -6,8 +10,19 @@ export default async function handler(req, res) {
   const userEmail = req.headers["x-user-email"] || req.query.email;
 
   // Supabase fallback / environment
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const supabaseUrl = (
+    process.env.SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    FALLBACK_SUPABASE_URL
+  )?.trim();
+  const supabaseKey = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    FALLBACK_SUPABASE_ANON_KEY
+  )?.trim();
 
   if (req.method === "POST") {
     if (supabaseUrl && supabaseKey) {
@@ -26,6 +41,8 @@ export default async function handler(req, res) {
         if (sRes.ok) {
           const data = await sRes.json();
           return res.status(200).json({ ok: true, order: data });
+        } else {
+          console.warn("Supabase POST order response not ok:", sRes.status, await sRes.text());
         }
       } catch (err) {
         console.error("Order Supabase save error:", err);
@@ -61,9 +78,11 @@ export default async function handler(req, res) {
       if (sRes.ok) {
         const orders = await sRes.json();
         return res.status(200).json({ orders });
+      } else {
+        console.warn("Supabase GET orders response not ok:", sRes.status, await sRes.text());
       }
-    } catch {
-      // Continue to empty list
+    } catch (err) {
+      console.warn("Supabase orders query exception:", err);
     }
   }
 

@@ -13,8 +13,24 @@ export default async function handler(req, res) {
   const baseUrl = env === "production" ? "https://api.cashfree.com/pg" : "https://sandbox.cashfree.com/pg";
 
   const isSimulate = req.query.simulate === "true";
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+  const FALLBACK_SUPABASE_URL = "https://zomwoprlbydezbbliyui.supabase.co";
+  const FALLBACK_SUPABASE_ANON_KEY =
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvbXdvcHJsYnlkZXpiYmxpeXVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4OTQ0MTEsImV4cCI6MjEwNzQ3MDQxMX0.ZsmboSVX_kN4J79tIbZBIbdFMIOijyhfqcayAbGHlt4";
+
+  const supabaseUrl = (
+    process.env.SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    FALLBACK_SUPABASE_URL
+  )?.trim();
+  const supabaseKey = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    FALLBACK_SUPABASE_ANON_KEY
+  )?.trim();
 
   try {
     let orderStatus = "PENDING";
@@ -35,14 +51,16 @@ export default async function handler(req, res) {
       orderStatus = cfData.order_status || "PENDING";
     }
 
+    let savedOrder = null;
     if (orderStatus === "PAID" && supabaseUrl && supabaseKey) {
       try {
-        await fetch(`${supabaseUrl}/rest/v1/orders?or=(id.eq.${orderId},cashfree_order_id.eq.${orderId})`, {
+        const patchRes = await fetch(`${supabaseUrl}/rest/v1/orders?or=(id.eq.${orderId},cashfree_order_id.eq.${orderId})`, {
           method: "PATCH",
           headers: {
             "content-type": "application/json",
             apikey: supabaseKey,
             authorization: `Bearer ${supabaseKey}`,
+            prefer: "return=representation",
           },
           body: JSON.stringify({
             payment_status: "PAID",
@@ -52,13 +70,22 @@ export default async function handler(req, res) {
             updated_at: new Date().toISOString(),
           }),
         });
-      } catch {}
+        if (patchRes.ok) {
+          const patchedList = await patchRes.json();
+          if (Array.isArray(patchedList) && patchedList.length > 0) {
+            savedOrder = patchedList[0];
+          }
+        }
+      } catch (err) {
+        console.warn("Supabase patch order error:", err);
+      }
     }
 
     return res.status(200).json({
       status: orderStatus,
       order_status: orderStatus,
       order_id: orderId,
+      order: savedOrder,
       cf_order: cfData,
     });
   } catch (err) {

@@ -1226,6 +1226,47 @@ function App() {
             setCartIds([]);
             try { localStorage.removeItem("techcircuit-cart"); } catch {}
             const ord = data.order || { id: returnOrderId, order_number: returnOrderId };
+            try {
+              const raw = localStorage.getItem("techcircuit_orders_store");
+              const list: AdminOrder[] = raw ? JSON.parse(raw) : [];
+              const fullOrd: AdminOrder = {
+                id: ord.id || returnOrderId!,
+                order_id: ord.order_id || returnOrderId!,
+                order_number: ord.order_number || `TCH-ORD-${(returnOrderId! || "").slice(-6).toUpperCase()}`,
+                customer_name: ord.customer_name || localStorage.getItem("techcircuit-customer-name") || "Student Customer",
+                customer_email: ord.customer_email || localStorage.getItem("techcircuit-customer-email") || "",
+                customer_phone: ord.customer_phone || "",
+                shipping_address: ord.shipping_address || {},
+                items: ord.items || [],
+                subtotal: ord.subtotal || ord.total_amount || 0,
+                shipping_charges: 0,
+                total_amount: ord.total_amount || 0,
+                currency: "INR",
+                payment_gateway: "cashfree",
+                payment_method: ord.payment_method || "upi",
+                payment_status: "PAID",
+                tracking_status: ord.tracking_status || "Order Placed",
+                created_at: ord.created_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                expected_delivery_date: ord.expected_delivery_date || new Date(Date.now() + 7 * 86400000).toISOString(),
+                admin_notes: ord.admin_notes || "",
+                status_history: ord.status_history || [
+                  {
+                    id: `hist-${Date.now()}`,
+                    order_id: ord.id || returnOrderId!,
+                    from_stage: null,
+                    to_stage: "Order Placed",
+                    changed_by: "system",
+                    note: "Payment completed successfully via Cashfree.",
+                    is_public: true,
+                    changed_at: new Date().toISOString(),
+                  },
+                ],
+              };
+              const filtered = list.filter((o) => o.id !== fullOrd.id && o.order_id !== fullOrd.order_id);
+              filtered.unshift(fullOrd);
+              localStorage.setItem("techcircuit_orders_store", JSON.stringify(filtered));
+            } catch {}
             setReturnConfirmedOrder(ord);
             setPage("Checkout");
           }
