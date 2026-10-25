@@ -428,7 +428,7 @@ const server = createServer(async (request, response) => {
           shipping_charges: shippingCharges,
           total_amount: totalAmount,
           currency: "INR",
-          payment_method: body?.paymentMethod === "qr" ? "upi_qr" : body?.paymentMethod === "upi" ? "upi" : "card",
+          payment_method: body?.paymentMethod === "card" ? "card" : body?.paymentMethod === "netbanking" ? "netbanking" : "upi",
           payment_gateway: "cashfree",
           cashfree_order_id: cashfreeOrderId,
           payment_session_id: cfOrder.payment_session_id,
@@ -505,17 +505,67 @@ const server = createServer(async (request, response) => {
       try {
         const cfData = await cashfreeRequest(`/orders/${order.cashfree_order_id}`, "GET");
         if (cfData?.order_status === "PAID") {
+          let detectedPaymentMethod = null;
+          try {
+            const payments = await cashfreeRequest(`/orders/${order.cashfree_order_id}/payments`, "GET");
+            if (Array.isArray(payments) && payments.length > 0) {
+              const successfulPayment = payments.find((p) => p.payment_status === "SUCCESS") || payments[0];
+              const group = (successfulPayment.payment_group || "").toLowerCase();
+              const methodObj = successfulPayment.payment_method || {};
+              if (group.includes("upi") || methodObj.upi) {
+                detectedPaymentMethod = "upi";
+              } else if (group.includes("card") || methodObj.card) {
+                detectedPaymentMethod = "card";
+              } else if (group.includes("netbanking") || group.includes("net_banking") || methodObj.netbanking) {
+                detectedPaymentMethod = "netbanking";
+              }
+            }
+          } catch (pmErr) {
+            console.warn("Could not query Cashfree order payments:", pmErr.message);
+          }
+
+          if (detectedPaymentMethod) {
+            order.payment_method = detectedPaymentMethod;
+          }
+
           order.payment_status = "PAID";
           order.paid_at = cfData.order_paid_time || new Date().toISOString();
           order.expected_delivery_date = new Date(Date.now() + deliveryDaysConfig * 86400000).toISOString();
           order.tracking_status = "Order Placed";
           order.updated_at = new Date().toISOString();
 
+          // Also sync to Supabase if configured
+          if (supabaseUrl && supabaseKey) {
+            try {
+              const patchBody = {
+                payment_status: "PAID",
+                paid_at: order.paid_at,
+                expected_delivery_date: order.expected_delivery_date,
+                tracking_status: "Order Placed",
+                updated_at: order.updated_at,
+              };
+              if (order.payment_method) {
+                patchBody.payment_method = order.payment_method;
+              }
+              await fetch(`${supabaseUrl}/rest/v1/orders?or=(id.eq.${order.id},cashfree_order_id.eq.${order.cashfree_order_id})`, {
+                method: "PATCH",
+                headers: {
+                  "content-type": "application/json",
+                  apikey: supabaseKey,
+                  authorization: `Bearer ${supabaseKey}`,
+                },
+                body: JSON.stringify(patchBody),
+              });
+            } catch (sbPatchErr) {
+              console.warn("Could not sync order update to Supabase:", sbPatchErr.message);
+            }
+          }
+
           // Add first history record
-          addHistoryEntry(order.id, null, "Order Placed", "System", "Payment confirmed via Cashfree Custom Web Checkout", true);
+          addHistoryEntry(order.id, null, "Order Placed", "System", "Payment confirmed via Cashfree Checkout", true);
           persistData();
 
-          console.log(`[ORDER PAID] Order: ${order.order_number} | Amount: ₹${order.total_amount} | Student: ${order.customer_email}`);
+          console.log(`[ORDER PAID] Order: ${order.order_number} | Method: ${order.payment_method} | Amount: ₹${order.total_amount} | Student: ${order.customer_email}`);
 
           sendJson(response, 200, {
             status: "PAID",

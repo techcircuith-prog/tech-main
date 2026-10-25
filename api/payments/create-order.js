@@ -83,17 +83,26 @@ export default async function handler(req, res) {
     const protocol = req.headers["x-forwarded-proto"] || "https";
     const appOrigin = `${protocol}://${host}`;
 
+    const clientOrigin = (
+      req.headers.origin ||
+      (req.headers.referer ? new URL(req.headers.referer).origin : "") ||
+      appOrigin
+    )?.replace(/\/+$/, "");
+
     let returnUrl = null;
     let notifyUrl = null;
-    if (appOrigin && appOrigin.startsWith("https://")) {
+    if (clientOrigin && clientOrigin.startsWith("https://")) {
+      returnUrl = `${clientOrigin}/?cf_order_id={order_id}&payment_status=success`;
+      notifyUrl = `${clientOrigin}/api/payments/webhook`;
+    } else if (appOrigin && appOrigin.startsWith("https://")) {
       returnUrl = `${appOrigin}/?cf_order_id={order_id}&payment_status=success`;
       notifyUrl = `${appOrigin}/api/payments/webhook`;
     } else if (process.env.APP_ORIGIN && process.env.APP_ORIGIN.startsWith("https://")) {
       returnUrl = `${process.env.APP_ORIGIN}/?cf_order_id={order_id}&payment_status=success`;
       notifyUrl = `${process.env.APP_ORIGIN}/api/payments/webhook`;
     } else if (env === "sandbox") {
-      returnUrl = `${appOrigin}/?cf_order_id={order_id}&payment_status=success`;
-      notifyUrl = `${appOrigin}/api/payments/webhook`;
+      returnUrl = `${clientOrigin || appOrigin}/?cf_order_id={order_id}&payment_status=success`;
+      notifyUrl = `${clientOrigin || appOrigin}/api/payments/webhook`;
     } else {
       returnUrl = "https://techcircuithub.com/?cf_order_id={order_id}&payment_status=success";
       notifyUrl = "https://techcircuithub.com/api/payments/webhook";
@@ -148,6 +157,14 @@ export default async function handler(req, res) {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
       FALLBACK_SUPABASE_ANON_KEY
     )?.trim();
+
+    const normalizedPaymentMethod =
+      body?.paymentMethod === "card"
+        ? "card"
+        : body?.paymentMethod === "netbanking"
+        ? "netbanking"
+        : "upi";
+
     if (supabaseUrl && supabaseKey) {
       try {
         await fetch(`${supabaseUrl}/rest/v1/orders`, {
@@ -176,7 +193,7 @@ export default async function handler(req, res) {
             shipping_charges: shippingCharges,
             total_amount: totalAmount,
             currency: "INR",
-            payment_method: body?.paymentMethod === "upi" ? "upi" : "card",
+            payment_method: normalizedPaymentMethod,
             payment_gateway: "cashfree",
             cashfree_order_id: cashfreeOrderId,
             payment_session_id: cfData.payment_session_id,

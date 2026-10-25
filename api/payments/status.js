@@ -51,9 +51,51 @@ export default async function handler(req, res) {
       orderStatus = cfData.order_status || "PENDING";
     }
 
+    let detectedPaymentMethod = null;
+    if (orderStatus === "PAID" && !isSimulate) {
+      try {
+        const pmRes = await fetch(`${baseUrl}/orders/${orderId}/payments`, {
+          method: "GET",
+          headers: {
+            "x-api-version": "2023-08-01",
+            "x-client-id": clientId,
+            "x-client-secret": clientSecret,
+          },
+        });
+        if (pmRes.ok) {
+          const payments = await pmRes.json();
+          if (Array.isArray(payments) && payments.length > 0) {
+            const successfulPayment = payments.find((p) => p.payment_status === "SUCCESS") || payments[0];
+            const group = (successfulPayment.payment_group || "").toLowerCase();
+            const methodObj = successfulPayment.payment_method || {};
+            if (group.includes("upi") || methodObj.upi) {
+              detectedPaymentMethod = "upi";
+            } else if (group.includes("card") || methodObj.card) {
+              detectedPaymentMethod = "card";
+            } else if (group.includes("netbanking") || group.includes("net_banking") || methodObj.netbanking) {
+              detectedPaymentMethod = "netbanking";
+            }
+          }
+        }
+      } catch (pmErr) {
+        console.warn("Could not query Cashfree order payments:", pmErr.message);
+      }
+    }
+
     let savedOrder = null;
     if (orderStatus === "PAID" && supabaseUrl && supabaseKey) {
       try {
+        const patchPayload = {
+          payment_status: "PAID",
+          paid_at: new Date().toISOString(),
+          expected_delivery_date: new Date(Date.now() + 7 * 86400000).toISOString(),
+          tracking_status: "Order Placed",
+          updated_at: new Date().toISOString(),
+        };
+        if (detectedPaymentMethod) {
+          patchPayload.payment_method = detectedPaymentMethod;
+        }
+
         const patchRes = await fetch(`${supabaseUrl}/rest/v1/orders?or=(id.eq.${orderId},cashfree_order_id.eq.${orderId})`, {
           method: "PATCH",
           headers: {
@@ -62,13 +104,7 @@ export default async function handler(req, res) {
             authorization: `Bearer ${supabaseKey}`,
             prefer: "return=representation",
           },
-          body: JSON.stringify({
-            payment_status: "PAID",
-            paid_at: new Date().toISOString(),
-            expected_delivery_date: new Date(Date.now() + 7 * 86400000).toISOString(),
-            tracking_status: "Order Placed",
-            updated_at: new Date().toISOString(),
-          }),
+          body: JSON.stringify(patchPayload),
         });
         if (patchRes.ok) {
           const patchedList = await patchRes.json();
@@ -81,8 +117,13 @@ export default async function handler(req, res) {
       }
     }
 
+    if (savedOrder && detectedPaymentMethod) {
+      savedOrder.payment_method = detectedPaymentMethod;
+    }
+
     return res.status(200).json({
       status: orderStatus,
+      detected_payment_method: detectedPaymentMethod,
       order_status: orderStatus,
       order_id: orderId,
       order: savedOrder,

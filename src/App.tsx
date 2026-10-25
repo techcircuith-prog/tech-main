@@ -1230,57 +1230,101 @@ function App() {
 
     async function verifyReturnPayment() {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/payments/status?orderId=${encodeURIComponent(returnOrderId!)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status === "PAID" || data.order_status === "PAID" || data.payment_status === "Paid" || data.order?.payment_status === "PAID") {
-            setCartIds([]);
-            try { localStorage.removeItem("techcircuit-cart"); } catch {}
-            const ord = data.order || { id: returnOrderId, order_number: returnOrderId };
-            try {
-              const raw = localStorage.getItem("techcircuit_orders_store");
-              const list: AdminOrder[] = raw ? JSON.parse(raw) : [];
-              const fullOrd: AdminOrder = {
-                id: ord.id || returnOrderId!,
-                order_id: ord.order_id || returnOrderId!,
-                order_number: ord.order_number || `TCH-ORD-${(returnOrderId! || "").slice(-6).toUpperCase()}`,
-                customer_name: ord.customer_name || localStorage.getItem("techcircuit-customer-name") || "Student Customer",
-                customer_email: ord.customer_email || localStorage.getItem("techcircuit-customer-email") || "",
-                customer_phone: ord.customer_phone || "",
-                shipping_address: ord.shipping_address || {},
-                items: ord.items || [],
-                subtotal: ord.subtotal || ord.total_amount || 0,
-                shipping_charges: 0,
-                total_amount: ord.total_amount || 0,
-                currency: "INR",
-                payment_gateway: "cashfree",
-                payment_method: ord.payment_method || "upi",
-                payment_status: "PAID",
-                tracking_status: ord.tracking_status || "Order Placed",
-                created_at: ord.created_at || new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                expected_delivery_date: ord.expected_delivery_date || new Date(Date.now() + 7 * 86400000).toISOString(),
-                admin_notes: ord.admin_notes || "",
-                status_history: ord.status_history || [
-                  {
-                    id: `hist-${Date.now()}`,
-                    order_id: ord.id || returnOrderId!,
-                    from_stage: null,
-                    to_stage: "Order Placed",
-                    changed_by: "system",
-                    note: "Payment completed successfully via Cashfree.",
-                    is_public: true,
-                    changed_at: new Date().toISOString(),
-                  },
-                ],
-              };
-              const filtered = list.filter((o) => o.id !== fullOrd.id && o.order_id !== fullOrd.order_id);
-              filtered.unshift(fullOrd);
-              localStorage.setItem("techcircuit_orders_store", JSON.stringify(filtered));
-            } catch {}
-            setReturnConfirmedOrder(ord);
-            setPage("Checkout");
+        let isPaid = false;
+        let ordData: any = null;
+        let detectedMethod: string | null = null;
+
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const res = await fetch(`${API_BASE_URL}/api/payments/status?orderId=${encodeURIComponent(returnOrderId!)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (
+              data.status === "PAID" ||
+              data.order_status === "PAID" ||
+              data.payment_status === "Paid" ||
+              data.order?.payment_status === "PAID"
+            ) {
+              isPaid = true;
+              ordData = data.order || {};
+              detectedMethod = data.detected_payment_method || ordData.payment_method || null;
+              break;
+            }
           }
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+
+        if (isPaid) {
+          setCartIds([]);
+          try { localStorage.removeItem("techcircuit-cart"); } catch {}
+
+          let lastCheckout: any = null;
+          try {
+            const rawCheckout = localStorage.getItem("techcircuit_last_checkout");
+            if (rawCheckout) lastCheckout = JSON.parse(rawCheckout);
+          } catch {}
+
+          const ord = ordData || { id: returnOrderId, order_number: returnOrderId };
+          const resolvedItems = (ord.items && ord.items.length > 0)
+            ? ord.items
+            : (lastCheckout?.items ? lastCheckout.items.map((it: any) => ({
+                project_id: it.id,
+                title: it.title,
+                price: it.price || 3499,
+                qty: 1,
+              })) : []);
+
+          const resolvedMethod =
+            detectedMethod ||
+            ord.payment_method ||
+            (lastCheckout?.paymentMethod === "card" ? "card" : "upi");
+
+          const fullOrd: AdminOrder = {
+            id: ord.id || returnOrderId!,
+            order_id: ord.order_id || returnOrderId!,
+            order_number: ord.order_number || lastCheckout?.order_number || `TCH-ORD-${(returnOrderId! || "").slice(-6).toUpperCase()}`,
+            customer_name: ord.customer_name || lastCheckout?.shippingAddress?.fullName || localStorage.getItem("techcircuit-customer-name") || "Student Customer",
+            customer_email: ord.customer_email || lastCheckout?.shippingAddress?.email || localStorage.getItem("techcircuit-customer-email") || "",
+            customer_phone: ord.customer_phone || lastCheckout?.shippingAddress?.phone || "",
+            shipping_address: ord.shipping_address && Object.keys(ord.shipping_address).length > 0 ? ord.shipping_address : (lastCheckout?.shippingAddress || {}),
+            items: resolvedItems,
+            subtotal: ord.subtotal || lastCheckout?.total || ord.total_amount || 0,
+            shipping_charges: 0,
+            total_amount: ord.total_amount || lastCheckout?.total || 0,
+            currency: "INR",
+            payment_gateway: "cashfree",
+            payment_method: resolvedMethod === "card" ? "card" : "upi",
+            payment_status: "PAID",
+            tracking_status: ord.tracking_status || "Order Placed",
+            created_at: ord.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            expected_delivery_date: ord.expected_delivery_date || new Date(Date.now() + 7 * 86400000).toISOString(),
+            admin_notes: ord.admin_notes || "",
+            status_history: ord.status_history || [
+              {
+                id: `hist-${Date.now()}`,
+                order_id: ord.id || returnOrderId!,
+                from_stage: null,
+                to_stage: "Order Placed",
+                changed_by: "system",
+                note: "Payment completed successfully via Cashfree Checkout.",
+                is_public: true,
+                changed_at: new Date().toISOString(),
+              },
+            ],
+          };
+
+          try {
+            const raw = localStorage.getItem("techcircuit_orders_store");
+            const list: AdminOrder[] = raw ? JSON.parse(raw) : [];
+            const filtered = list.filter((o) => o.id !== fullOrd.id && o.order_id !== fullOrd.order_id);
+            filtered.unshift(fullOrd);
+            localStorage.setItem("techcircuit_orders_store", JSON.stringify(filtered));
+          } catch {}
+
+          setReturnConfirmedOrder(fullOrd);
+          setActiveTrackingOrder(fullOrd);
+          setPage("Checkout");
+          showToast("Payment Successful! Your order has been placed.", "success");
         }
       } catch (err) {
         console.error("Failed to verify return order:", err);
@@ -1989,19 +2033,24 @@ function App() {
       if (["/login", "/signin", "/student-login", "/auth"].includes(window.location.pathname.replace(/\/+$/, ""))) {
         window.history.replaceState({}, "", "/");
       }
+      showToast(`Welcome back, ${user.user_metadata?.name || user.email || "Student"}!`, "success");
       const client = getSupabase();
       if (client) {
         void resolveUserRole(client, user).then((role) => {
           setStudentSection("overview");
           setAuthRecovery(false);
-          if (role === "student") navigate("Dashboard");
+          if (page !== "Checkout" && page !== "Cart" && page !== "PaymentResult") {
+            if (role === "student") navigate("Dashboard");
+          }
         });
       } else {
         setCurrentUser(user);
         setUserRole("student");
         setStudentSection("overview");
         setAuthRecovery(false);
-        navigate("Dashboard");
+        if (page !== "Checkout" && page !== "Cart" && page !== "PaymentResult") {
+          navigate("Dashboard");
+        }
       }
     }} />}
     {pendingOpportunityPrompt && (
@@ -3828,6 +3877,7 @@ function ProjectCheckoutPage({
 
       // Pre-save checkout context and purchased items
       setPurchasedItems(activeCartItems);
+      const normalizedMethod = paymentMethod === "card" ? "card" : "upi";
       try {
         localStorage.setItem("techcircuit_last_checkout", JSON.stringify({
           order_id: orderData.order_id,
@@ -3835,11 +3885,12 @@ function ProjectCheckoutPage({
           cashfree_order_id: orderData.cashfree_order_id,
           items: activeCartItems,
           shippingAddress: shippingAddressPayload,
-          paymentMethod,
+          paymentMethod: normalizedMethod,
           total,
           timestamp: Date.now(),
         }));
         localStorage.setItem("techcircuit-customer-email", shippingAddressPayload.email);
+        localStorage.setItem("techcircuit-customer-name", shippingAddressPayload.fullName);
       } catch {}
 
       // Always match the environment that created the payment session
@@ -3850,24 +3901,37 @@ function ProjectCheckoutPage({
           ? "production"
           : "production";
 
-      if (typeof window.Cashfree === "undefined") {
-        throw new Error("Cashfree SDK not loaded. Please check your connection.");
-      }
+      const checkoutPageUrl = resolvedMode === "production"
+        ? `https://api.cashfree.com/pg/view/sessions/checkout?session_id=${encodeURIComponent(orderData.payment_session_id)}`
+        : `https://sandbox.cashfree.com/pg/view/sessions/checkout?session_id=${encodeURIComponent(orderData.payment_session_id)}`;
 
-      const cashfree = window.Cashfree({ mode: resolvedMode });
-
-      if (paymentMethod === "qr") {
-        // 2. Open Cashfree dynamic UPI QR Code Modal directly
-        const payResult = await cashfree.checkout({
-          paymentSessionId: orderData.payment_session_id,
-          redirectTarget: "_modal",
-        });
-
-        if (payResult?.error) {
-          const errMsg = payResult.error.message || payResult.error.description || "Payment cancelled or rejected.";
-          throw new Error(errMsg);
+      if (paymentMethod === "qr" || paymentMethod === "upi") {
+        // Direct redirect to Cashfree hosted checkout website (no modal popup on site)
+        window.dispatchEvent(
+          new CustomEvent("techcircuit:toast", {
+            detail: { message: "Redirecting to Cashfree secure checkout...", type: "info" },
+          })
+        );
+        if (typeof window.Cashfree !== "undefined") {
+          try {
+            const cashfree = window.Cashfree({ mode: resolvedMode });
+            await cashfree.checkout({
+              paymentSessionId: orderData.payment_session_id,
+              redirectTarget: "_self",
+            });
+            return;
+          } catch (cfErr) {
+            console.warn("Cashfree JS SDK checkout error, falling back to direct URL navigation:", cfErr);
+          }
         }
+        window.location.href = checkoutPageUrl;
+        return;
       } else if (paymentMethod === "card") {
+        if (typeof window.Cashfree === "undefined") {
+          window.location.href = checkoutPageUrl;
+          return;
+        }
+        const cashfree = window.Cashfree({ mode: resolvedMode });
         const { cardNumber, cardExpiry, cardCvv, cardHolder } = cardElementsRef.current;
         if (!cardNumber || !cardExpiry || !cardCvv) {
           throw new Error("Card inputs not ready. Please enter your card details.");
@@ -3893,22 +3957,30 @@ function ProjectCheckoutPage({
             paymentMethod: cardPayload,
             paymentSessionId: orderData.payment_session_id,
             savePaymentInstrument: false,
-            redirectTarget: "_modal",
+            redirectTarget: "_self",
           });
           if (payResult?.error) {
             throw new Error(payResult.error.message || payResult.error.description || "Card payment rejected.");
           }
+          return;
         } catch (payErr: any) {
-          console.warn("Direct card element pay unavailable, falling back to Cashfree modal checkout:", payErr);
-          const payResult = await cashfree.checkout({
-            paymentSessionId: orderData.payment_session_id,
-            redirectTarget: "_modal",
-          });
-          if (payResult?.error) {
-            throw new Error(payResult.error.message || payResult.error.description || "Payment cancelled.");
+          console.warn("Direct card element pay error, redirecting to Cashfree checkout:", payErr);
+          try {
+            await cashfree.checkout({
+              paymentSessionId: orderData.payment_session_id,
+              redirectTarget: "_self",
+            });
+          } catch {
+            window.location.href = checkoutPageUrl;
           }
+          return;
         }
       } else {
+        if (typeof window.Cashfree === "undefined") {
+          window.location.href = checkoutPageUrl;
+          return;
+        }
+        const cashfree = window.Cashfree({ mode: resolvedMode });
         const upiComp = upiComponentRef.current;
         if (!upiComp) {
           throw new Error("UPI input not ready. Please enter your UPI ID.");
@@ -3924,22 +3996,25 @@ function ProjectCheckoutPage({
             paymentMethod: upiComp,
             paymentSessionId: orderData.payment_session_id,
             savePaymentInstrument: false,
-            redirectTarget: "_modal",
+            redirectTarget: "_self",
           });
           if (payResult?.error) {
             setUpiAwaiting(false);
             throw new Error(payResult.error.message || payResult.error.description || "UPI collect rejected.");
           }
+          return;
         } catch (payErr: any) {
           setUpiAwaiting(false);
-          console.warn("Direct UPI collect unavailable, falling back to Cashfree modal checkout:", payErr);
-          const payResult = await cashfree.checkout({
-            paymentSessionId: orderData.payment_session_id,
-            redirectTarget: "_modal",
-          });
-          if (payResult?.error) {
-            throw new Error(payResult.error.message || payResult.error.description || "Payment cancelled.");
+          console.warn("Direct UPI collect error, redirecting to Cashfree checkout:", payErr);
+          try {
+            await cashfree.checkout({
+              paymentSessionId: orderData.payment_session_id,
+              redirectTarget: "_self",
+            });
+          } catch {
+            window.location.href = checkoutPageUrl;
           }
+          return;
         }
       }
 
@@ -3972,7 +4047,7 @@ function ProjectCheckoutPage({
               customer_email: emailAddress.trim(),
               customer_phone: cleanPhone,
               shipping_address: shippingAddressPayload,
-              payment_method: paymentMethod,
+              payment_method: normalizedMethod,
               payment_status: "PAID",
               tracking_status: "Order Placed",
               items: activeCartItems.map((item) => ({
@@ -4007,7 +4082,7 @@ function ProjectCheckoutPage({
             customer_email: emailAddress.trim(),
             customer_phone: cleanPhone,
             shipping_address: shippingAddressPayload,
-            payment_method: paymentMethod,
+            payment_method: normalizedMethod,
             payment_status: "PAID",
             tracking_status: "Order Placed",
             items: activeCartItems.map((item) => ({
@@ -4029,7 +4104,7 @@ function ProjectCheckoutPage({
         throw new Error("Payment verification pending. If amount was debited, our team will confirm your order shortly.");
       }
 
-      await finalizeSuccessfulOrder(verifiedOrder, shippingAddressPayload);
+      await finalizeSuccessfulOrder(verifiedOrder!, shippingAddressPayload);
     } catch (err: any) {
       setUpiAwaiting(false);
       console.error("[PAYMENT ERROR]", err);
@@ -7325,7 +7400,7 @@ function StudentDashboard({
                       {selectedTrackingOrder.tracking_status}
                     </span>
                     <span style={{ fontSize: "13px", fontWeight: 700, color: "#16A34A", background: "#DCFCE7", padding: "4px 10px", borderRadius: "999px" }}>
-                      PAID via {selectedTrackingOrder.payment_method === "upi" ? "UPI" : "Card"}
+                      PAID via {selectedTrackingOrder.payment_method?.toLowerCase().includes("card") ? "Card" : "UPI"}
                     </span>
                   </div>
                 </div>
@@ -9403,7 +9478,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                             Order ID: <code style={{ fontSize: "12px", background: "#F1F5F9", padding: "2px 6px", borderRadius: "4px" }}>{selectedAdminOrder.cashfree_order_id || selectedAdminOrder.id}</code>
                           </p>
                           <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#475569" }}>
-                            Method: <strong>{selectedAdminOrder.payment_method?.toUpperCase()}</strong>
+                            Method: <strong>{selectedAdminOrder.payment_method?.toLowerCase().includes("card") ? "CARD" : "UPI"}</strong>
                           </p>
                           <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#475569" }}>
                             Total Amount: <strong style={{ color: "#F97316", fontSize: "14px" }}>{formatRupee(selectedAdminOrder.total_amount)}</strong>
