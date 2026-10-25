@@ -67,7 +67,7 @@ export default async function handler(req, res) {
 
     const clientId = process.env.CASHFREE_CLIENT_ID;
     const clientSecret = process.env.CASHFREE_CLIENT_SECRET;
-    const env = process.env.CASHFREE_ENV === "production" ? "production" : "sandbox";
+    const env = (process.env.CASHFREE_ENV === "production" || process.env.VITE_CASHFREE_ENV === "production") ? "production" : "sandbox";
     const baseUrl = env === "production" ? "https://api.cashfree.com/pg" : "https://sandbox.cashfree.com/pg";
 
     if (!clientId || !clientSecret) {

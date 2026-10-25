@@ -58,7 +58,7 @@ const TRACKING_STAGES = [
 ];
 
 const port = Number(process.env.API_PORT || 8787);
-const environment = process.env.CASHFREE_ENV === "production" ? "production" : "sandbox";
+const environment = (process.env.CASHFREE_ENV === "production" || process.env.VITE_CASHFREE_ENV === "production") ? "production" : "sandbox";
 const cashfreeBaseUrl = environment === "production"
   ? "https://api.cashfree.com/pg"
   : "https://sandbox.cashfree.com/pg";
@@ -412,7 +412,7 @@ const server = createServer(async (request, response) => {
           shipping_charges: shippingCharges,
           total_amount: totalAmount,
           currency: "INR",
-          payment_method: body?.paymentMethod === "upi" ? "upi" : "card",
+          payment_method: body?.paymentMethod === "qr" ? "upi_qr" : body?.paymentMethod === "upi" ? "upi" : "card",
           payment_gateway: "cashfree",
           cashfree_order_id: cashfreeOrderId,
           payment_session_id: cfOrder.payment_session_id,

@@ -61,6 +61,7 @@ import {
   Download,
   Truck,
   CreditCard,
+  QrCode,
   ChevronUp,
   Wrench,
 } from "lucide-react";
@@ -191,6 +192,16 @@ export interface CashfreeInstance {
     paymentSessionId: string;
     savePaymentInstrument?: boolean | CashfreeComponent;
     redirectTarget?: string;
+  }): Promise<{
+    error?: { message?: string; code?: string; description?: string };
+    paymentDetails?: unknown;
+    redirect?: boolean;
+    paymentMessage?: string;
+  }>;
+  checkout(options: {
+    paymentSessionId: string;
+    redirectTarget?: string;
+    returnUrl?: string;
   }): Promise<{
     error?: { message?: string; code?: string; description?: string };
     paymentDetails?: unknown;
@@ -3392,7 +3403,7 @@ function ProjectCheckoutPage({
   const [saveForFuture, setSaveForFuture] = useState(true);
 
   // Payment fields
-  const [paymentMethod, setPaymentMethod] = useState<"card" | "upi">("card");
+  const [paymentMethod, setPaymentMethod] = useState<"qr" | "card" | "upi">("qr");
   const [submitting, setSubmitting] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [confirmedOrderId, setConfirmedOrderId] = useState(() => initialConfirmedOrder?.order_number || initialConfirmedOrder?.id || "");
@@ -3567,8 +3578,8 @@ function ProjectCheckoutPage({
 
   // Mount Cashfree Elements when payment step is reached
   useEffect(() => {
-    if (step !== "payment") return;
-    const mode = (import.meta.env.VITE_CASHFREE_ENV as "sandbox" | "production") || "sandbox";
+    if (step !== "payment" || paymentMethod === "qr") return;
+    const mode = (import.meta.env.VITE_CASHFREE_ENV === "production" || import.meta.env.VITE_CASHFREE_ENV === "prod") ? "production" : "sandbox";
 
     const timer = setTimeout(() => {
       if (typeof window.Cashfree === "undefined") {
@@ -3830,15 +3841,25 @@ function ProjectCheckoutPage({
         localStorage.setItem("techcircuit-customer-email", shippingAddressPayload.email);
       } catch {}
 
-      const mode = (import.meta.env.VITE_CASHFREE_ENV as "sandbox" | "production") || "sandbox";
+      const mode = (import.meta.env.VITE_CASHFREE_ENV === "production" || import.meta.env.VITE_CASHFREE_ENV === "prod") ? "production" : "sandbox";
       if (typeof window.Cashfree === "undefined") {
         throw new Error("Cashfree SDK not loaded. Please check your connection.");
       }
 
       const cashfree = window.Cashfree({ mode });
-      let paymentMethodPayload: any = null;
 
-      if (paymentMethod === "card") {
+      if (paymentMethod === "qr") {
+        // 2. Open Cashfree dynamic UPI QR Code Modal directly
+        const payResult = await cashfree.checkout({
+          paymentSessionId: orderData.payment_session_id,
+          redirectTarget: "_modal",
+        });
+
+        if (payResult?.error) {
+          const errMsg = payResult.error.message || payResult.error.description || "Payment cancelled or rejected.";
+          throw new Error(errMsg);
+        }
+      } else if (paymentMethod === "card") {
         const { cardNumber, cardExpiry, cardCvv, cardHolder } = cardElementsRef.current;
         if (!cardNumber || !cardExpiry || !cardCvv) {
           throw new Error("Card inputs not ready. Please enter your card details.");
@@ -3852,12 +3873,33 @@ function ProjectCheckoutPage({
         if (typeof cardCvv.isComplete === "function" && !cardCvv.isComplete()) {
           throw new Error("Please enter a valid 3-digit CVV.");
         }
-        paymentMethodPayload = {
+        const cardPayload = {
           cardNumber,
           cardExpiry,
           cardCvv,
           cardHolder: cardHolder || undefined,
         };
+
+        try {
+          const payResult = await cashfree.pay({
+            paymentMethod: cardPayload,
+            paymentSessionId: orderData.payment_session_id,
+            savePaymentInstrument: false,
+            redirectTarget: "_modal",
+          });
+          if (payResult?.error) {
+            throw new Error(payResult.error.message || payResult.error.description || "Card payment rejected.");
+          }
+        } catch (payErr: any) {
+          console.warn("Direct card element pay unavailable, falling back to Cashfree modal checkout:", payErr);
+          const payResult = await cashfree.checkout({
+            paymentSessionId: orderData.payment_session_id,
+            redirectTarget: "_modal",
+          });
+          if (payResult?.error) {
+            throw new Error(payResult.error.message || payResult.error.description || "Payment cancelled.");
+          }
+        }
       } else {
         const upiComp = upiComponentRef.current;
         if (!upiComp) {
@@ -3866,26 +3908,31 @@ function ProjectCheckoutPage({
         if (typeof upiComp.isComplete === "function" && !upiComp.isComplete()) {
           throw new Error("Please enter a valid UPI ID (e.g. success@upi).");
         }
-        paymentMethodPayload = upiComp;
-      }
-
-      if (paymentMethod === "upi") {
         setUpiAwaiting(true);
         setUpiTimer(300);
-      }
 
-      // 2. Execute cashfree.pay() in-page (NO redirectTarget "_self", "_blank", or "_top")
-      const payResult = await cashfree.pay({
-        paymentMethod: paymentMethodPayload,
-        paymentSessionId: orderData.payment_session_id,
-        savePaymentInstrument: false,
-        redirectTarget: "_modal",
-      });
-
-      if (payResult?.error) {
-        setUpiAwaiting(false);
-        const errMsg = payResult.error.message || payResult.error.description || "Payment cancelled or rejected.";
-        throw new Error(errMsg);
+        try {
+          const payResult = await cashfree.pay({
+            paymentMethod: upiComp,
+            paymentSessionId: orderData.payment_session_id,
+            savePaymentInstrument: false,
+            redirectTarget: "_modal",
+          });
+          if (payResult?.error) {
+            setUpiAwaiting(false);
+            throw new Error(payResult.error.message || payResult.error.description || "UPI collect rejected.");
+          }
+        } catch (payErr: any) {
+          setUpiAwaiting(false);
+          console.warn("Direct UPI collect unavailable, falling back to Cashfree modal checkout:", payErr);
+          const payResult = await cashfree.checkout({
+            paymentSessionId: orderData.payment_session_id,
+            redirectTarget: "_modal",
+          });
+          if (payResult?.error) {
+            throw new Error(payResult.error.message || payResult.error.description || "Payment cancelled.");
+          }
+        }
       }
 
       // 3. Confirm authentic payment status on server (never trust browser alone)
@@ -4907,7 +4954,75 @@ function ProjectCheckoutPage({
                     <fieldset className="checkout-radio-fieldset">
                       <legend className="sr-only">Choose payment method</legend>
                       <div className="payment-methods-stack">
-                        {/* Option 1: Credit / Debit Card (Selected by default) */}
+                        {/* Option 1: Instant UPI QR Code (Scan to Pay - Default & Easiest) */}
+                        <label
+                          className={`payment-method-card ${paymentMethod === "qr" ? "selected" : ""}`}
+                          onClick={() => setPaymentMethod("qr")}
+                        >
+                          <input
+                            type="radio"
+                            name="paymentOption"
+                            value="qr"
+                            checked={paymentMethod === "qr"}
+                            onChange={() => setPaymentMethod("qr")}
+                          />
+                          <div className="payment-method-left">
+                            <div className="checkout-radio-circle">
+                              {paymentMethod === "qr" && <div className="checkout-radio-inner-dot" />}
+                            </div>
+                            <div className="checkout-radio-avatar" style={{ background: paymentMethod === "qr" ? "#FFE6D5" : "#F8FAFC", color: paymentMethod === "qr" ? "#F97316" : "#64748B" }}>
+                              <QrCode size={19} />
+                            </div>
+                            <div className="payment-method-text">
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <strong>UPI QR Code (Scan to Pay)</strong>
+                                <span style={{ background: "#DCFCE7", color: "#15803D", fontSize: "10.5px", fontWeight: 700, padding: "2px 7px", borderRadius: "999px", letterSpacing: "0.03em" }}>
+                                  EASIEST &amp; FASTEST ⚡
+                                </span>
+                              </div>
+                              <small>Scan dynamic QR with Google Pay, PhonePe, Paytm, CRED, BHIM</small>
+                            </div>
+                          </div>
+                          <div className="payment-partner-logos">
+                            <GooglePayLogo />
+                            <PhonePeLogo />
+                            <PaytmLogo />
+                          </div>
+                        </label>
+
+                        {/* QR Code Scan Info Banner */}
+                        {paymentMethod === "qr" && (
+                          <div
+                            className="cf-qr-elements-wrapper"
+                            style={{
+                              marginTop: "-8px",
+                              marginBottom: "12px",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "16px",
+                              background: "linear-gradient(135deg, #FFF7ED 0%, #FFFFFF 100%)",
+                              padding: "16px 18px",
+                              borderRadius: "14px",
+                              border: "1.5px solid #F97316",
+                              boxShadow: "0 2px 8px rgba(249, 115, 22, 0.08)",
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div style={{ width: "52px", height: "52px", borderRadius: "12px", background: "#FFE6D5", color: "#F97316", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                              <QrCode size={28} />
+                            </div>
+                            <div>
+                              <strong style={{ display: "block", fontSize: "13.5px", color: "#0F1F3D", marginBottom: "3px" }}>
+                                Instant Scan &amp; Pay via UPI
+                              </strong>
+                              <p style={{ margin: 0, fontSize: "12px", color: "#64748B", lineHeight: 1.4 }}>
+                                Clicking <strong>Scan &amp; Pay via UPI QR</strong> will pop up a live dynamic QR code on screen. Simply scan with any mobile UPI app to confirm your project kit order.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Option 2: Credit / Debit Card */}
                         <label
                           className={`payment-method-card ${paymentMethod === "card" ? "selected" : ""}`}
                           onClick={() => setPaymentMethod("card")}
@@ -5110,14 +5225,18 @@ function ProjectCheckoutPage({
                       </div>
                     )}
 
-                    {/* Primary Button: Pay Now */}
+                    {/* Primary Button: Pay Now / Scan & Pay */}
                     <button
                       className="checkout-primary-pill-btn"
                       type="button"
                       disabled={submitting}
                       onClick={handlePayNow}
                     >
-                      <Lock size={18} /> {submitting ? "Processing payment…" : <>Pay Now {formatRupee(total)} <ArrowRight size={18} /></>}
+                      <Lock size={18} /> {submitting ? "Opening Payment Gateway…" : (
+                        paymentMethod === "qr"
+                          ? <>Scan &amp; Pay {formatRupee(total)} via UPI QR <ArrowRight size={18} /></>
+                          : <>Pay Now {formatRupee(total)} <ArrowRight size={18} /></>
+                      )}
                     </button>
 
                     {/* Consent line with interactive policy links */}
@@ -10777,7 +10896,9 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                         </div>
                         <div className="admin-profile-stat-box">
                           <span className="stat-label">Payment Gateway Mode</span>
-                          <strong className="stat-value">Cashfree Sandbox</strong>
+                          <strong className={`stat-value ${import.meta.env.VITE_CASHFREE_ENV === "production" ? "text-success" : ""}`}>
+                            {import.meta.env.VITE_CASHFREE_ENV === "production" ? "Cashfree Production (Live)" : "Cashfree Sandbox"}
+                          </strong>
                         </div>
                       </div>
 
