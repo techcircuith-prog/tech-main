@@ -3817,6 +3817,7 @@ function ProjectCheckoutPage({
         order_number?: string;
         cashfree_order_id?: string;
         payment_session_id?: string;
+        environment?: "sandbox" | "production";
         amount?: number;
         error?: string;
       };
@@ -3841,12 +3842,19 @@ function ProjectCheckoutPage({
         localStorage.setItem("techcircuit-customer-email", shippingAddressPayload.email);
       } catch {}
 
-      const mode = (import.meta.env.VITE_CASHFREE_ENV === "production" || import.meta.env.VITE_CASHFREE_ENV === "prod") ? "production" : "sandbox";
+      // Always match the environment that created the payment session
+      const resolvedMode: "sandbox" | "production" =
+        orderData.environment === "production" || orderData.environment === "sandbox"
+          ? orderData.environment
+          : (import.meta.env.VITE_CASHFREE_ENV === "production" || import.meta.env.VITE_CASHFREE_ENV === "prod")
+          ? "production"
+          : "production";
+
       if (typeof window.Cashfree === "undefined") {
         throw new Error("Cashfree SDK not loaded. Please check your connection.");
       }
 
-      const cashfree = window.Cashfree({ mode });
+      const cashfree = window.Cashfree({ mode: resolvedMode });
 
       if (paymentMethod === "qr") {
         // 2. Open Cashfree dynamic UPI QR Code Modal directly
@@ -3985,7 +3993,7 @@ function ProjectCheckoutPage({
       setUpiAwaiting(false);
 
       if (!verifiedOrder) {
-        if (mode === "sandbox") {
+        if (resolvedMode === "sandbox") {
           verifiedOrder = {
             id: orderData.order_id,
             order_id: orderData.order_id,

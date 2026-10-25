@@ -448,6 +448,7 @@ const server = createServer(async (request, response) => {
         // Return only payment_session_id and order IDs
         sendJson(response, 201, {
           payment_session_id: cfOrder.payment_session_id,
+          environment,
           order_id: internalOrderId,
           order_number: orderNumber,
           cashfree_order_id: cashfreeOrderId,

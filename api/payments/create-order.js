@@ -191,6 +191,7 @@ export default async function handler(req, res) {
 
     return res.status(201).json({
       payment_session_id: cfData.payment_session_id,
+      environment: env,
       order_id: internalOrderId,
       order_number: orderNumber,
       cashfree_order_id: cashfreeOrderId,
