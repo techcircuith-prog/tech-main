@@ -83,6 +83,22 @@ export default async function handler(req, res) {
     const protocol = req.headers["x-forwarded-proto"] || "https";
     const appOrigin = `${protocol}://${host}`;
 
+    let returnUrl = null;
+    let notifyUrl = null;
+    if (appOrigin && appOrigin.startsWith("https://")) {
+      returnUrl = `${appOrigin}/?cf_order_id={order_id}&payment_status=success`;
+      notifyUrl = `${appOrigin}/api/payments/webhook`;
+    } else if (process.env.APP_ORIGIN && process.env.APP_ORIGIN.startsWith("https://")) {
+      returnUrl = `${process.env.APP_ORIGIN}/?cf_order_id={order_id}&payment_status=success`;
+      notifyUrl = `${process.env.APP_ORIGIN}/api/payments/webhook`;
+    } else if (env === "sandbox") {
+      returnUrl = `${appOrigin}/?cf_order_id={order_id}&payment_status=success`;
+      notifyUrl = `${appOrigin}/api/payments/webhook`;
+    } else {
+      returnUrl = "https://techcircuithub.com/?cf_order_id={order_id}&payment_status=success";
+      notifyUrl = "https://techcircuithub.com/api/payments/webhook";
+    }
+
     const cfRes = await fetch(`${baseUrl}/orders`, {
       method: "POST",
       headers: {
@@ -102,8 +118,8 @@ export default async function handler(req, res) {
           customer_phone: cleanPhone,
         },
         order_meta: {
-          return_url: `${appOrigin}/?cf_order_id={order_id}&payment_status=success`,
-          notify_url: `${appOrigin}/api/payments/webhook`,
+          return_url: returnUrl,
+          notify_url: notifyUrl,
         },
         order_note: `Order ${orderNumber}`,
       }),

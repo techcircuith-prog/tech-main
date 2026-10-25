@@ -355,6 +355,22 @@ const server = createServer(async (request, response) => {
         const reqOrigin = request.headers.origin || (request.headers.referer ? new URL(request.headers.referer).origin : null);
         const clientOrigin = reqOrigin || appOrigin;
 
+        let returnUrl = null;
+        let notifyUrl = null;
+        if (clientOrigin && clientOrigin.startsWith("https://")) {
+          returnUrl = `${clientOrigin}/?cf_order_id={order_id}&payment_status=success`;
+          notifyUrl = `${clientOrigin}/api/payments/webhook`;
+        } else if (process.env.APP_ORIGIN && process.env.APP_ORIGIN.startsWith("https://")) {
+          returnUrl = `${process.env.APP_ORIGIN}/?cf_order_id={order_id}&payment_status=success`;
+          notifyUrl = `${process.env.APP_ORIGIN}/api/payments/webhook`;
+        } else if (environment === "sandbox") {
+          returnUrl = `${clientOrigin}/?cf_order_id={order_id}&payment_status=success`;
+          notifyUrl = `${clientOrigin}/api/payments/webhook`;
+        } else {
+          returnUrl = "https://techcircuithub.com/?cf_order_id={order_id}&payment_status=success";
+          notifyUrl = "https://techcircuithub.com/api/payments/webhook";
+        }
+
         // Create order via Cashfree SDK/API with sanitized 10-digit phone
         let cfOrder;
         try {
@@ -369,8 +385,8 @@ const server = createServer(async (request, response) => {
               customer_phone: customer.phone, // strictly 10 digits
             },
             order_meta: {
-              return_url: `${clientOrigin}/?cf_order_id={order_id}&payment_status=success`,
-              notify_url: `${clientOrigin}/api/payments/webhook`,
+              return_url: returnUrl,
+              notify_url: notifyUrl,
             },
             order_note: `Order ${orderNumber} - ${projectPrices.length} project kit(s)`,
           });
