@@ -7897,12 +7897,19 @@ function AdminPage({ onExit }: { onExit: () => void }) {
           const text = await res.text();
           let data: any = {};
           try { data = text ? JSON.parse(text) : {}; } catch {}
-          const serverOrders: AdminOrder[] = data.orders || [];
+          const serverOrders: AdminOrder[] = (data.orders || []).filter(
+            (o: any) => o.admin_notes !== "deleted" && o.tracking_status !== "Deleted"
+          );
 
           let localOrders: AdminOrder[] = [];
           try {
             const raw = localStorage.getItem("techcircuit_orders_store");
-            if (raw) localOrders = JSON.parse(raw);
+            if (raw) {
+              const parsed: AdminOrder[] = JSON.parse(raw);
+              localOrders = parsed.filter(
+                (o: any) => o.admin_notes !== "deleted" && o.tracking_status !== "Deleted"
+              );
+            }
           } catch {}
 
           const orderMap = new Map<string, AdminOrder>();
@@ -7922,7 +7929,12 @@ function AdminPage({ onExit }: { onExit: () => void }) {
           let localOrders: AdminOrder[] = [];
           try {
             const raw = localStorage.getItem("techcircuit_orders_store");
-            if (raw) localOrders = JSON.parse(raw);
+            if (raw) {
+              const parsed: AdminOrder[] = JSON.parse(raw);
+              localOrders = parsed.filter(
+                (o: any) => o.admin_notes !== "deleted" && o.tracking_status !== "Deleted"
+              );
+            }
           } catch {}
           if (localOrders.length > 0) setAdminOrders(localOrders);
         })
@@ -8198,6 +8210,68 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     const text = `${order.customer_name}\n${order.customer_phone}\n${order.shipping_address?.addressLine1 || ""}${order.shipping_address?.addressLine2 ? `, ${order.shipping_address.addressLine2}` : ""}\n${order.shipping_address?.city || ""}, ${order.shipping_address?.state || ""} - ${order.shipping_address?.pincode || ""}`;
     navigator.clipboard.writeText(text);
     showToast("Delivery address copied to clipboard!", "success");
+  }
+
+  // Delete a single order (test or obsolete)
+  async function handleDeleteSingleOrder(orderId: string) {
+    if (!window.confirm(`Are you sure you want to delete order ${orderId}? This will remove it from the admin console.`)) {
+      return;
+    }
+
+    try {
+      await fetch(`/api/orders?id=${encodeURIComponent(orderId)}`, {
+        method: "DELETE",
+        headers: {
+          "x-user-role": "admin",
+        },
+      });
+    } catch (e) {
+      console.warn("Server delete call failed, falling back to local deletion:", e);
+    }
+
+    try {
+      const raw = localStorage.getItem("techcircuit_orders_store");
+      if (raw) {
+        const list: AdminOrder[] = JSON.parse(raw);
+        const filtered = list.filter((o) => o.id !== orderId && o.order_id !== orderId);
+        localStorage.setItem("techcircuit_orders_store", JSON.stringify(filtered));
+      }
+    } catch {}
+
+    setAdminOrders((prev) => prev.filter((o) => o.id !== orderId && o.order_id !== orderId));
+    if (selectedAdminOrder && (selectedAdminOrder.id === orderId || selectedAdminOrder.order_id === orderId)) {
+      setSelectedAdminOrder(null);
+    }
+
+    showToast(`Order ${orderId} removed.`, "success");
+    setOrdersRevision((r) => r + 1);
+  }
+
+  // Clear all test orders for clean handover
+  async function handleClearAllTestOrders() {
+    if (!window.confirm("Are you sure you want to delete all test orders before handing over to the client? This will remove all orders permanently.")) {
+      return;
+    }
+
+    try {
+      await fetch("/api/orders?all=true", {
+        method: "DELETE",
+        headers: {
+          "x-user-role": "admin",
+        },
+      });
+    } catch (e) {
+      console.warn("Server delete all call failed:", e);
+    }
+
+    try {
+      localStorage.removeItem("techcircuit_orders_store");
+    } catch {}
+
+    setAdminOrders([]);
+    setSelectedAdminOrder(null);
+    showToast("All test orders deleted successfully. Ready for client handover!", "success");
+    setOrdersRevision((r) => r + 1);
   }
 
   // Check if order is overdue
@@ -9386,6 +9460,14 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       {/* Top Action Bar */}
                       <div className="admin-order-detail-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            className="button button-outline button-small"
+                            onClick={() => setSelectedAdminOrder(null)}
+                            title="Back to orders list"
+                          >
+                            <ArrowLeft size={14} /> Back
+                          </button>
                           <h2 style={{ margin: 0, fontSize: "20px", color: "#0F1F3D", fontWeight: 800 }}>
                             Order #{selectedAdminOrder.order_number || selectedAdminOrder.id}
                           </h2>
@@ -9418,6 +9500,15 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                             title="Print packing slip and shipping label"
                           >
                             <Printer size={14} /> Print Packing Slip
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-outline button-small"
+                            style={{ borderColor: "#ef4444", color: "#ef4444" }}
+                            onClick={() => handleDeleteSingleOrder(selectedAdminOrder.id)}
+                            title="Delete this order"
+                          >
+                            <Trash2 size={14} /> Delete Order
                           </button>
                         </div>
                       </div>
@@ -9789,7 +9880,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                             Ready-made designs are built to order. Manage customer shipments, update stages, and set courier tracking details.
                           </p>
                         </div>
-                        <div className="admin-header-actions" style={{ display: "flex", gap: "8px" }}>
+                        <div className="admin-header-actions" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                           <button
                             type="button"
                             className="button button-outline"
@@ -9809,6 +9900,17 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                           >
                             <Download size={15} /> Export CSV
                           </button>
+                          {adminOrders.length > 0 && (
+                            <button
+                              type="button"
+                              className="button button-outline"
+                              style={{ borderColor: "#ef4444", color: "#ef4444" }}
+                              onClick={handleClearAllTestOrders}
+                              title="Clear all test orders for clean client handover"
+                            >
+                              <Trash2 size={15} /> Clear Test Orders
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -10018,13 +10120,24 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                                         </div>
                                       </td>
                                       <td style={{ padding: "12px 16px", textAlign: "right" }}>
-                                        <button
-                                          type="button"
-                                          className="button button-outline button-small"
-                                          onClick={() => openOrderDetail(ord)}
-                                        >
-                                          Manage <ArrowRight size={13} />
-                                        </button>
+                                        <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
+                                          <button
+                                            type="button"
+                                            className="button button-outline button-small"
+                                            onClick={() => openOrderDetail(ord)}
+                                          >
+                                            Manage <ArrowRight size={13} />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="button button-outline button-small"
+                                            style={{ borderColor: "#ef4444", color: "#ef4444" }}
+                                            onClick={() => handleDeleteSingleOrder(ord.id)}
+                                            title="Delete order"
+                                          >
+                                            <Trash2 size={13} />
+                                          </button>
+                                        </div>
                                       </td>
                                     </tr>
                                   );

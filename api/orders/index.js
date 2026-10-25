@@ -114,6 +114,54 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  if (req.method === "DELETE") {
+    const singleId = req.query.id || req.query.order_id;
+    const clearAll = req.query.all === "true" || req.query.test === "true";
+
+    if (supabaseUrl && supabaseKey) {
+      try {
+        if (clearAll) {
+          try {
+            await fetch(`${supabaseUrl}/rest/v1/orders?id=neq.placeholder_none`, {
+              method: "DELETE",
+              headers: { apikey: supabaseKey, authorization: `Bearer ${supabaseKey}` },
+            });
+          } catch {}
+          await fetch(`${supabaseUrl}/rest/v1/orders?id=neq.placeholder_none`, {
+            method: "PATCH",
+            headers: {
+              "content-type": "application/json",
+              apikey: supabaseKey,
+              authorization: `Bearer ${supabaseKey}`,
+            },
+            body: JSON.stringify({ admin_notes: "deleted", tracking_status: "Deleted" }),
+          });
+          return res.status(200).json({ success: true, message: "All test orders removed." });
+        } else if (singleId) {
+          try {
+            await fetch(`${supabaseUrl}/rest/v1/orders?id=eq.${encodeURIComponent(singleId)}`, {
+              method: "DELETE",
+              headers: { apikey: supabaseKey, authorization: `Bearer ${supabaseKey}` },
+            });
+          } catch {}
+          await fetch(`${supabaseUrl}/rest/v1/orders?id=eq.${encodeURIComponent(singleId)}`, {
+            method: "PATCH",
+            headers: {
+              "content-type": "application/json",
+              apikey: supabaseKey,
+              authorization: `Bearer ${supabaseKey}`,
+            },
+            body: JSON.stringify({ admin_notes: "deleted", tracking_status: "Deleted" }),
+          });
+          return res.status(200).json({ success: true, message: `Order ${singleId} removed.` });
+        }
+      } catch (err) {
+        console.warn("Delete order error in /api/orders:", err);
+      }
+    }
+    return res.status(200).json({ success: true });
+  }
+
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
   if (supabaseUrl && supabaseKey) {
@@ -143,7 +191,10 @@ export default async function handler(req, res) {
 
       if (sRes.ok) {
         const orders = await sRes.json();
-        return res.status(200).json({ orders });
+        const activeOrders = Array.isArray(orders)
+          ? orders.filter((o) => o.admin_notes !== "deleted" && o.tracking_status !== "Deleted")
+          : [];
+        return res.status(200).json({ orders: activeOrders });
       } else {
         console.warn("Supabase GET orders response not ok:", sRes.status, await sRes.text());
       }

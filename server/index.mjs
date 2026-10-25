@@ -647,10 +647,10 @@ const server = createServer(async (request, response) => {
       const stageFilter = url.searchParams.get("stage");
       const search = url.searchParams.get("search")?.toLowerCase().trim();
 
-      // Deduplicate orders from store
+      // Deduplicate orders from store (exclude deleted test orders)
       const uniqueOrders = Array.from(new Set(Array.from(ordersStore.values()).map((o) => o.id)))
         .map((id) => ordersStore.get(id))
-        .filter(Boolean);
+        .filter((o) => Boolean(o) && o.admin_notes !== "deleted" && o.tracking_status !== "Deleted");
 
       let filtered = uniqueOrders;
 
@@ -701,6 +701,72 @@ const server = createServer(async (request, response) => {
           delivered: uniqueOrders.filter((o) => o.tracking_status === "Delivered").length,
         },
       }, request);
+      return;
+    }
+
+    // -------------------------------------------------------------
+    // DELETE /api/orders: Delete single order or clear all test orders
+    // -------------------------------------------------------------
+    if (request.method === "DELETE" && (url.pathname === "/api/orders" || url.pathname.startsWith("/api/orders/"))) {
+      const orderId = url.pathname.startsWith("/api/orders/") && url.pathname !== "/api/orders/stage"
+        ? url.pathname.slice("/api/orders/".length)
+        : url.searchParams.get("id");
+      const clearAll = url.searchParams.get("all") === "true" || url.searchParams.get("test") === "true";
+
+      if (clearAll) {
+        ordersStore.clear();
+        historyStore.clear();
+        persistData();
+
+        // Also purge in Supabase if configured
+        if (supabaseUrl && supabaseKey) {
+          try {
+            await fetch(`${supabaseUrl}/rest/v1/orders?id=neq.placeholder_none`, {
+              method: "PATCH",
+              headers: {
+                "content-type": "application/json",
+                apikey: supabaseKey,
+                authorization: `Bearer ${supabaseKey}`,
+              },
+              body: JSON.stringify({ admin_notes: "deleted", tracking_status: "Deleted" }),
+            });
+          } catch {}
+        }
+
+        sendJson(response, 200, { success: true, message: "All test orders cleared successfully." }, request);
+        return;
+      }
+
+      if (orderId) {
+        const order = ordersStore.get(orderId);
+        if (order) {
+          ordersStore.delete(order.id);
+          if (order.cashfree_order_id) ordersStore.delete(order.cashfree_order_id);
+          if (order.order_number) ordersStore.delete(order.order_number);
+          historyStore.delete(order.id);
+          persistData();
+        }
+
+        // Also sync to Supabase if configured
+        if (supabaseUrl && supabaseKey) {
+          try {
+            await fetch(`${supabaseUrl}/rest/v1/orders?id=eq.${encodeURIComponent(orderId)}`, {
+              method: "PATCH",
+              headers: {
+                "content-type": "application/json",
+                apikey: supabaseKey,
+                authorization: `Bearer ${supabaseKey}`,
+              },
+              body: JSON.stringify({ admin_notes: "deleted", tracking_status: "Deleted" }),
+            });
+          } catch {}
+        }
+
+        sendJson(response, 200, { success: true, message: `Order #${orderId} removed.` }, request);
+        return;
+      }
+
+      sendJson(response, 400, { error: "Missing orderId or all=true flag." }, request);
       return;
     }
 
