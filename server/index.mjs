@@ -66,6 +66,25 @@ const cashfreeBaseUrl = environment === "production"
 const appOrigin = process.env.APP_ORIGIN || "http://localhost:3000";
 const deliveryDaysConfig = Number(process.env.ORDER_DELIVERY_DAYS || 7);
 
+const FALLBACK_SUPABASE_URL = "https://zomwoprlbydezbbliyui.supabase.co";
+const FALLBACK_SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvbXdvcHJsYnlkZXpiYmxpeXVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4OTQ0MTEsImV4cCI6MjEwNzQ3MDQxMX0.ZsmboSVX_kN4J79tIbZBIbdFMIOijyhfqcayAbGHlt4";
+
+const supabaseUrl = (
+  process.env.SUPABASE_URL ||
+  process.env.VITE_SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  FALLBACK_SUPABASE_URL
+)?.trim();
+
+const supabaseKey = (
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  FALLBACK_SUPABASE_ANON_KEY
+)?.trim();
+
 // Local persistence for orders & history so local testing and admin survive restarts
 const DATA_FILE = new URL("./orders-data.json", import.meta.url);
 const ordersStore = new Map();

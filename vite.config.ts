@@ -15,6 +15,19 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_CASHFREE_ENV": JSON.stringify(cashfreeEnv),
     },
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            "vendor-react": ["react", "react-dom"],
+            "vendor-supabase": ["@supabase/supabase-js"],
+            "vendor-icons": ["lucide-react"],
+            "vendor-pdf": ["jspdf"],
+          },
+        },
+      },
+      chunkSizeWarningLimit: 800,
+    },
     server: {
       port: 3000,
       proxy: {

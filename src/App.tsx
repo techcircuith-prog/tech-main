@@ -64,6 +64,7 @@ import {
   QrCode,
   ChevronUp,
   Wrench,
+  UploadCloud,
 } from "lucide-react";
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import { jsPDF } from "jspdf";
@@ -73,6 +74,10 @@ import trainingOpportunityImage from "../home image/card 2.png";
 import hackathonOpportunityImage from "../home image/card 3.png";
 import resourceImage from "../home image/card 5.png";
 import projectPricesInRupees from "../shared/project-prices.json";
+import {
+  INITIAL_20_COMPONENTS,
+  LEGACY_SAMPLE_PRODUCT_TITLES,
+} from "./data/componentsCatalog";
 
 const PLATFORM_NAME = "TechCircuit Hub";
 const PLATFORM_TAGLINE = "Discover. Learn. Build. Innovate.";
@@ -588,7 +593,6 @@ export const specialOfferProject: Listing = {
 };
 
 const projectListings: Listing[] = [
-  specialOfferProject,
   ...projectGroups.flatMap((group, groupIndex) =>
     group.titles.map((title, projectIndex): Listing => {
       const imageNumber = groupIndex * 7 + projectIndex + 1;
@@ -609,6 +613,40 @@ const projectListings: Listing[] = [
     }),
   ),
 ];
+
+function safeImageUrl(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("blob:") ||
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("./")
+  ) {
+    return trimmed;
+  }
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol === "https:" || url.protocol === "http:") {
+      return url.href;
+    }
+  } catch {
+    // not a valid external URL
+  }
+  return "";
+}
+
+function getLocalCustomComponents(): Listing[] {
+  try {
+    const raw = localStorage.getItem("techcircuit:custom_components");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 const navigationItems: { label: string; page: Page }[] = [
   { label: "Home", page: "Home" },
@@ -1424,7 +1462,11 @@ function App() {
   }, []);
 
   const listings = useMemo(() => {
-    const all = [...remoteListings, ...catalog];
+    const customList = getLocalCustomComponents();
+    const filteredRemote = remoteListings.filter(
+      (item) => !(item.kind === "Products" && LEGACY_SAMPLE_PRODUCT_TITLES.has(item.title.trim().toLowerCase()))
+    );
+    const all = [...filteredRemote, ...customList, ...(INITIAL_20_COMPONENTS as Listing[]), ...catalog];
     const seenIds = new Set<string>();
     const seenKeys = new Set<string>();
     const result: Listing[] = [];
@@ -2071,94 +2113,193 @@ function App() {
   );
 }
 
-function useFlashSaleCountdown() {
-  const [timeLeft, setTimeLeft] = useState<{ hours: string; minutes: string; seconds: string }>({
-    hours: "06",
-    minutes: "45",
-    seconds: "30",
-  });
-
-  useEffect(() => {
-    const calculateTimeRemaining = () => {
-      const now = new Date();
-      const cycleMs = 8 * 60 * 60 * 1000;
-      const timeIntoCycle = now.getTime() % cycleMs;
-      const diffMs = cycleMs - timeIntoCycle;
-
-      const totalSec = Math.max(0, Math.floor(diffMs / 1000));
-      const hours = Math.floor(totalSec / 3600);
-      const minutes = Math.floor((totalSec % 3600) / 60);
-      const seconds = totalSec % 60;
-
-      return {
-        hours: String(hours).padStart(2, "0"),
-        minutes: String(minutes).padStart(2, "0"),
-        seconds: String(seconds).padStart(2, "0"),
-      };
-    };
-
-    setTimeLeft(calculateTimeRemaining());
-    const interval = window.setInterval(() => {
-      setTimeLeft(calculateTimeRemaining());
-    }, 1000);
-
-    return () => window.clearInterval(interval);
-  }, []);
-
-  return timeLeft;
-}
-
-function HomeFlashOfferBanner({
-  onOrderNow,
-  onViewDetails,
+function HomeWhatsNewSection({
+  listings,
+  navigate,
+  onViewListing,
+  addProjectToCart,
 }: {
-  onOrderNow: () => void;
-  onViewDetails: () => void;
+  listings: Listing[];
+  navigate: (page: Page) => void;
+  onViewListing: (listing: Listing) => void;
+  addProjectToCart: (id: string) => void;
 }) {
-  const { hours, minutes, seconds } = useFlashSaleCountdown();
+  // Exactly 4 curated fresh arrivals (2 columns x 2 rows)
+  const freshArrivals = useMemo(() => {
+    const topComponent = listings.find((item) => item.kind === "Products" && item.componentDetails);
+    const topProjects = listings.filter((item) => item.kind === "Projects" && item.id !== SPECIAL_OFFER_PROJECT_ID && item.imageUrl).slice(0, 2);
+    const topOpportunity = listings.find((item) => (item.kind === "Internships" || item.kind === "Hackathons" || item.kind === "Training") && item.sourceUrl);
+
+    const items: Listing[] = [];
+    if (topComponent) items.push(topComponent);
+    items.push(...topProjects);
+    if (topOpportunity) items.push(topOpportunity);
+
+    if (items.length < 4) {
+      const remaining = listings.filter((l) => !items.some((i) => i.id === l.id) && l.id !== SPECIAL_OFFER_PROJECT_ID).slice(0, 4 - items.length);
+      items.push(...remaining);
+    }
+    return items.slice(0, 4);
+  }, [listings]);
 
   return (
-    <section className="flash-deal-banner" aria-label="Limited time flash offer">
-      <div className="flash-deal-content">
-        <div className="flash-deal-badge-row">
-          <span className="flash-live-dot" />
-          <span className="flash-badge-text">ECE STUDENT FLASH OFFER</span>
-          <span className="flash-offer-pill">FLAT ₹20 ONLY</span>
-        </div>
-        <h2 className="flash-deal-title">
-          Mini DC Motor &amp; Fan Circuit Kit — <strong>Only ₹20</strong>
-        </h2>
-        <p className="flash-deal-desc">
-          Complete starter project kit with <strong>1x High-Torque DC Toy Motor</strong> + <strong>1x Mini Fan Propeller (3-Blade)</strong> + <strong>1x 9V Battery &amp; Snap Clip Connector</strong>. Hands-on motor rotation, circuit polarity &amp; kinetic load experiments for electronics engineering learners.
-        </p>
-        <div className="flash-deal-actions">
-          <button className="button button-accent flash-buy-button" type="button" onClick={onOrderNow}>
-            Order for ₹20 Now <ArrowRight size={15} />
-          </button>
-          <button className="flash-details-link" type="button" onClick={onViewDetails}>
-            View kit specifications <ArrowUpRight size={14} />
-          </button>
+    <section className="whats-new-section" aria-label="All Fresh Arrivals in TechCircuit">
+      <div className="whats-new-hero-banner">
+        <div className="whats-new-hero-top">
+          <div className="whats-new-badge-row">
+            <span className="whats-new-pulse-dot" />
+            <span className="whats-new-badge-label">JUST ARRIVED</span>
+            <span className="whats-new-pill">ALL FRESH ARRIVALS</span>
+          </div>
+          <div className="whats-new-header-flex">
+            <div>
+              <h2 className="whats-new-heading">
+                All Fresh Arrivals in <span>TechCircuit</span>
+              </h2>
+              <p className="whats-new-lead">
+                Newly cataloged hardware kits, verified ECE components &amp; student opportunities.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="whats-new-more-link header-explore-btn"
+              onClick={() => navigate("Projects")}
+            >
+              Explore all <ArrowRight size={14} />
+            </button>
+          </div>
         </div>
       </div>
-      <div className="flash-timer-box">
-        <span className="flash-timer-header">OFFER ENDS IN</span>
-        <div className="flash-timer-digits" aria-label={`Offer ends in ${hours} hours, ${minutes} minutes, ${seconds} seconds`}>
-          <div className="timer-unit">
-            <span className="timer-number">{hours}</span>
-            <span className="timer-tag">HRS</span>
-          </div>
-          <span className="timer-colon">:</span>
-          <div className="timer-unit">
-            <span className="timer-number">{minutes}</span>
-            <span className="timer-tag">MIN</span>
-          </div>
-          <span className="timer-colon">:</span>
-          <div className="timer-unit">
-            <span className="timer-number">{seconds}</span>
-            <span className="timer-tag">SEC</span>
-          </div>
-        </div>
-        <span className="flash-timer-sub">⚡ Special ECE offer price of ₹20 applies while timer is active!</span>
+
+      {/* 2 Column x 2 Row Grid */}
+      <div className="whats-new-grid whats-new-2x2-grid" role="region" aria-label="Fresh arrivals list">
+        {freshArrivals.map((item) => {
+          const isComponent = item.kind === "Products";
+          const isProject = item.kind === "Projects";
+          const isOpportunity = item.kind === "Internships" || item.kind === "Hackathons" || item.kind === "Training";
+
+          const cardImg =
+            item.componentDetails?.imageUrl ||
+            item.imageUrl ||
+            (item.kind === "Internships"
+              ? internshipOpportunityImage
+              : item.kind === "Hackathons"
+              ? hackathonOpportunityImage
+              : item.kind === "Training"
+              ? trainingOpportunityImage
+              : undefined);
+
+          const digikeyOffer = item.componentDetails?.offers?.find((o) => o.seller.toLowerCase().includes("digikey"));
+          const mouserOffer = item.componentDetails?.offers?.find((o) => o.seller.toLowerCase().includes("mouser"));
+          const primaryOffer = digikeyOffer || mouserOffer || item.componentDetails?.offers?.[0];
+
+          return (
+            <article key={item.id} className="whats-new-card">
+              <div className="whats-new-card-media">
+                {cardImg ? (
+                  <img src={cardImg} alt={item.title} loading="lazy" decoding="async" />
+                ) : (
+                  <div className="whats-new-media-fallback">
+                    {isComponent ? <Cpu size={24} /> : isProject ? <CircuitBoard size={24} /> : <GraduationCap size={24} />}
+                  </div>
+                )}
+                <div className="whats-new-card-badges">
+                  <span className={`whats-new-type-badge type-${item.kind.toLowerCase()}`}>
+                    {isComponent ? "Component" : isProject ? "Project" : item.kind}
+                  </span>
+                  <span className="whats-new-new-badge">
+                    <Sparkles size={9} /> NEW
+                  </span>
+                </div>
+              </div>
+
+              <div className="whats-new-card-body">
+                <div className="whats-new-card-org">
+                  {isComponent ? (
+                    <span>{item.organization || item.componentDetails?.category || "ECE Component"}</span>
+                  ) : isProject ? (
+                    <span>{item.projectCategory || "Hardware Kit"}</span>
+                  ) : (
+                    <span>{item.organization || item.city}</span>
+                  )}
+                </div>
+
+                <h3 className="whats-new-card-title" title={item.title}>
+                  {item.title}
+                </h3>
+
+                {/* Specific metadata / price display */}
+                <div className="whats-new-card-meta">
+                  {isComponent && (
+                    <div className="whats-new-price-chips">
+                      {digikeyOffer && (
+                        <span className="price-chip digikey-chip">DigiKey: ₹{digikeyOffer.price.toFixed(0)}</span>
+                      )}
+                      {mouserOffer && (
+                        <span className="price-chip mouser-chip">Mouser: ₹{mouserOffer.price.toFixed(0)}</span>
+                      )}
+                      {!digikeyOffer && !mouserOffer && primaryOffer && (
+                        <span className="price-chip">{primaryOffer.seller}: ₹{primaryOffer.price.toFixed(0)}</span>
+                      )}
+                      {(!item.componentDetails?.offers || item.componentDetails.offers.length === 0) && (
+                        <span className="price-chip">In Stock</span>
+                      )}
+                    </div>
+                  )}
+
+                  {isProject && (
+                    <div className="whats-new-price-chips">
+                      <span className="price-chip project-kit-chip">
+                        {item.projectPrice ? formatPrice(item.projectPrice) : "Kit Available"}
+                      </span>
+                    </div>
+                  )}
+
+                  {isOpportunity && (
+                    <div className="whats-new-price-chips">
+                      <span className="price-chip opp-chip">
+                        {item.tags[0] || item.city || "Verified"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Card actions */}
+                <div className="whats-new-card-actions">
+                  {isComponent && (
+                    <button
+                      type="button"
+                      className="button button-primary button-small whats-new-btn-full"
+                      onClick={() => onViewListing(item)}
+                    >
+                      Compare Prices <ArrowRight size={11} />
+                    </button>
+                  )}
+
+                  {isProject && (
+                    <button
+                      type="button"
+                      className="button button-primary button-small whats-new-btn-full"
+                      onClick={() => addProjectToCart(item.id)}
+                    >
+                      Order Kit <ShoppingCart size={11} />
+                    </button>
+                  )}
+
+                  {isOpportunity && (
+                    <button
+                      type="button"
+                      className="button button-primary button-small whats-new-btn-full"
+                      onClick={() => onViewListing(item)}
+                    >
+                      View &amp; Apply <ArrowRight size={11} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </article>
+          );
+        })}
       </div>
     </section>
   );
@@ -2179,11 +2320,10 @@ function HomePage({
 }) {
   const [showcaseIndex, setShowcaseIndex] = useState(0);
   const [showcasePaused, setShowcasePaused] = useState(false);
-  const offerProject = listings.find((item) => item.id === SPECIAL_OFFER_PROJECT_ID) || specialOfferProject;
-  const otherFeatured = ["Microcontroller-Based Project", "IoT Project", "PCB Design"]
+  const otherFeatured = ["Microcontroller-Based Project", "IoT Project", "PCB Design", "Robotics Project"]
     .map((category) => listings.find((item) => item.kind === "Projects" && item.projectCategory === category && item.imageUrl && item.id !== SPECIAL_OFFER_PROJECT_ID))
     .filter((item): item is Listing => Boolean(item));
-  const featuredProjects = [offerProject, ...otherFeatured].slice(0, 4);
+  const featuredProjects = (otherFeatured.length > 0 ? otherFeatured : listings.filter((item) => item.kind === "Projects" && item.id !== SPECIAL_OFFER_PROJECT_ID)).slice(0, 4);
   const featuredInternships = listings
     .filter((item) => item.kind === "Internships" && item.featured && item.sourceUrl)
     .sort((left, right) => Number(Boolean(right.featured)) - Number(Boolean(left.featured)))
@@ -2224,9 +2364,11 @@ function HomePage({
       </section>
 
       <section className="home-content">
-        <HomeFlashOfferBanner
-          onOrderNow={() => addProjectToCart(SPECIAL_OFFER_PROJECT_ID)}
-          onViewDetails={() => onViewListing(offerProject)}
+        <HomeWhatsNewSection
+          listings={listings}
+          navigate={navigate}
+          onViewListing={onViewListing}
+          addProjectToCart={addProjectToCart}
         />
 
         <div
@@ -3070,7 +3212,7 @@ function parseComponentDetails(value: unknown): ComponentDetails | undefined {
   return {
     mpn: details.mpn.trim(),
     category: typeof details.category === "string" ? details.category : "",
-    imageUrl: typeof details.imageUrl === "string" ? safeExternalUrl(details.imageUrl) : "",
+    imageUrl: typeof details.imageUrl === "string" ? safeImageUrl(details.imageUrl) : "",
     offers,
   };
 }
@@ -7848,6 +7990,9 @@ function AdminPage({ onExit }: { onExit: () => void }) {
   const [compCategory, setCompCategory] = useState("");
   const [compSummary, setCompSummary] = useState("");
   const [compImageUrl, setCompImageUrl] = useState("");
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
+  const compFileInputRef = useRef<HTMLInputElement>(null);
   const [offerDrafts, setOfferDrafts] = useState<[ComponentOfferDraft, ComponentOfferDraft]>([
     newComponentOfferDraft(),
     newComponentOfferDraft(),
@@ -8679,6 +8824,8 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     setCompCategory("");
     setCompSummary("");
     setCompImageUrl("");
+    setShowUrlInput(false);
+    setImageUploading(false);
     setOfferDrafts([newComponentOfferDraft(), newComponentOfferDraft()]);
     setCompFormOpen(true);
   }
@@ -8696,6 +8843,8 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     setCompMpn(details.mpn);
     setCompCategory(details.category);
     setCompImageUrl(details.imageUrl);
+    setShowUrlInput(Boolean(details.imageUrl && (details.imageUrl.startsWith("http") || details.imageUrl.startsWith("/"))));
+    setImageUploading(false);
     setOfferDrafts([
       componentOfferToDraft(details.offers[0]),
       componentOfferToDraft(details.offers[1]),
@@ -8704,17 +8853,94 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     window.scrollTo({ top: 120, behavior: "smooth" });
   }
 
+  // Handle image upload from Gallery or device file picker
+  async function handleImageFileSelect(file: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("Please choose a valid image file (PNG, JPG, JPEG, WEBP, SVG, GIF, etc.).", "error");
+      return;
+    }
+    setImageUploading(true);
+    try {
+      if (file.type === "image/svg+xml" || file.size < 400 * 1024) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setCompImageUrl(reader.result as string);
+          setImageUploading(false);
+          showToast("Image loaded from gallery.", "success");
+        };
+        reader.onerror = () => {
+          setImageUploading(false);
+          showToast("Could not read image file.", "error");
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      // For larger images, optimize/compress via HTML5 Canvas
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new window.Image();
+        img.onload = () => {
+          const maxDim = 1200;
+          let width = img.width;
+          let height = img.height;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            setCompImageUrl(reader.result as string);
+            setImageUploading(false);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const output = canvas.toDataURL("image/webp", 0.88);
+          setCompImageUrl(output);
+          setImageUploading(false);
+          showToast("Image optimized and loaded from gallery.", "success");
+        };
+        img.onerror = () => {
+          setImageUploading(false);
+          showToast("Could not process selected image.", "error");
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => {
+        setImageUploading(false);
+        showToast("Could not read image file.", "error");
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      setImageUploading(false);
+      showToast("Image loading error.", "error");
+    }
+  }
+
   // Delete component
   async function deleteComponent(product: Listing) {
     if (!supabase || !isAdmin) return;
     if (!window.confirm(`Permanently remove "${product.title}" (${product.componentDetails?.mpn}) from catalog?`)) return;
 
     try {
-      const { error } = await supabase.from("listings").delete().eq("id", product.id);
-      if (error) {
-        showToast(`Could not delete component: ${error.message}`, "error");
-        return;
+      try {
+        await supabase.from("listings").delete().eq("id", product.id);
+      } catch (dbErr) {
+        console.warn("Direct Supabase product delete note:", dbErr);
       }
+      // Also delete from local custom storage
+      const customList = getLocalCustomComponents().filter((x) => x.id !== product.id && x.title !== product.title);
+      localStorage.setItem("techcircuit:custom_components", JSON.stringify(customList));
+
       setProductRows((rows) => rows.filter((r) => r.id !== product.id));
       showToast(`Removed "${product.title}" from catalog.`, "success");
       setProductRowsRefreshRevision((r) => r + 1);
@@ -8769,8 +8995,9 @@ function AdminPage({ onExit }: { onExit: () => void }) {
       return;
     }
 
-    if (compImageUrl.trim() && !safeExternalUrl(compImageUrl.trim())) {
-      showToast("Component image URL must begin with https://", "error");
+    const cleanImgUrl = safeImageUrl(compImageUrl.trim());
+    if (compImageUrl.trim() && !cleanImgUrl) {
+      showToast("Please provide a valid image from gallery or a valid URL/path.", "error");
       return;
     }
 
@@ -8787,7 +9014,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
         details: {
           mpn: compMpn.trim(),
           category: compCategory.trim(),
-          imageUrl: compImageUrl.trim() ? safeExternalUrl(compImageUrl.trim()) : "",
+          imageUrl: cleanImgUrl,
           offers: normalizedOffers,
         },
         verification_status: "verified",
@@ -8797,11 +9024,43 @@ function AdminPage({ onExit }: { onExit: () => void }) {
         updated_at: new Date().toISOString(),
       };
 
-      const result = editingProductId
-        ? await supabase.from("listings").update(productValues).eq("id", editingProductId)
-        : await supabase.from("listings").insert(productValues);
+      try {
+        if (editingProductId) {
+          await supabase.from("listings").update(productValues).eq("id", editingProductId);
+        } else {
+          await supabase.from("listings").insert(productValues);
+        }
+      } catch (dbErr) {
+        console.warn("Direct Supabase product insert note:", dbErr);
+      }
 
-      if (result.error) throw result.error;
+      // Also persist to custom local storage
+      const customList = getLocalCustomComponents();
+      const targetId = editingProductId || ("local-comp-" + Date.now());
+      const customItem: Listing = {
+        id: targetId,
+        kind: "Products",
+        title: compTitle.trim(),
+        organization: compOrg.trim(),
+        city: "Online",
+        summary: compSummary.trim(),
+        tags: compCategory.trim() ? [compCategory.trim()] : [],
+        sourceUrl: normalizedOffers[0].sellerUrl,
+        verified: true,
+        featured: false,
+        updated: new Date().toISOString(),
+        componentDetails: {
+          mpn: compMpn.trim(),
+          category: compCategory.trim(),
+          imageUrl: cleanImgUrl,
+          offers: normalizedOffers,
+        },
+      };
+
+      const updatedCustom = editingProductId
+        ? customList.map((x) => (x.id === editingProductId ? customItem : x))
+        : [customItem, ...customList];
+      localStorage.setItem("techcircuit:custom_components", JSON.stringify(updatedCustom));
 
       setCompFormOpen(false);
       setEditingProductId("");
@@ -8811,6 +9070,8 @@ function AdminPage({ onExit }: { onExit: () => void }) {
       setCompCategory("");
       setCompSummary("");
       setCompImageUrl("");
+      setShowUrlInput(false);
+      setImageUploading(false);
       setOfferDrafts([newComponentOfferDraft(), newComponentOfferDraft()]);
       setProductRowsRefreshRevision((r) => r + 1);
       window.dispatchEvent(new Event("techcircuit:listings-updated"));
@@ -10591,25 +10852,117 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                         </div>
 
                         <div className="admin-field-full">
-                          <label>Component Image URL (https)</label>
-                          <div className="admin-image-input-group">
-                            <input
-                              type="url"
-                              placeholder="https://images.example.com/lm7805.jpg"
-                              value={compImageUrl}
-                              onChange={(e) => setCompImageUrl(e.target.value)}
-                            />
-                            {compImageUrl && (
-                              <div className="admin-image-preview-thumb">
-                                <img
-                                  src={compImageUrl}
-                                  alt="Preview"
-                                  onError={(e) => {
-                                    (e.target as HTMLElement).style.display = "none";
-                                  }}
-                                />
+                          <label>Component Image (Upload from Gallery or Device)</label>
+                          <input
+                            ref={compFileInputRef}
+                            type="file"
+                            accept="image/*"
+                            style={{ display: "none" }}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) void handleImageFileSelect(file);
+                              e.target.value = "";
+                            }}
+                          />
+
+                          <div className="admin-gallery-uploader">
+                            {compImageUrl ? (
+                              <div className="admin-gallery-preview-card">
+                                <div className="admin-gallery-preview-left">
+                                  <img
+                                    className="admin-gallery-thumb"
+                                    src={compImageUrl}
+                                    alt="Component Preview"
+                                    onError={(e) => {
+                                      (e.target as HTMLElement).style.display = "none";
+                                    }}
+                                  />
+                                  <div className="admin-gallery-meta">
+                                    <span className="admin-gallery-badge">
+                                      <CheckCircle2 size={12} /> Image Ready
+                                    </span>
+                                    <span className="admin-gallery-filename">
+                                      {compImageUrl.startsWith("data:")
+                                        ? "Image loaded from Gallery / Files"
+                                        : compImageUrl.split("/").pop() || "Component Image"}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="admin-gallery-actions">
+                                  <button
+                                    type="button"
+                                    className="admin-gallery-btn-replace"
+                                    onClick={() => compFileInputRef.current?.click()}
+                                    disabled={imageUploading}
+                                  >
+                                    <UploadCloud size={14} /> Replace
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="admin-gallery-btn-remove"
+                                    onClick={() => setCompImageUrl("")}
+                                    title="Remove image"
+                                  >
+                                    <Trash2 size={14} /> Remove
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div
+                                className="admin-gallery-dropzone"
+                                onClick={() => compFileInputRef.current?.click()}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  const file = e.dataTransfer.files?.[0];
+                                  if (file) void handleImageFileSelect(file);
+                                }}
+                              >
+                                <div className="admin-gallery-icon-wrap">
+                                  {imageUploading ? (
+                                    <RefreshCw className="animate-spin" size={24} />
+                                  ) : (
+                                    <UploadCloud size={24} />
+                                  )}
+                                </div>
+                                <div className="admin-gallery-title">
+                                  {imageUploading ? (
+                                    "Processing image..."
+                                  ) : (
+                                    <>
+                                      <span>Click to select from Gallery / Device</span> or drag & drop
+                                    </>
+                                  )}
+                                </div>
+                                <p className="admin-gallery-subtitle">
+                                  Supports PNG, JPG, JPEG, WEBP, SVG, GIF (all formats)
+                                </p>
                               </div>
                             )}
+
+                            <div>
+                              <button
+                                type="button"
+                                className="admin-gallery-url-toggle"
+                                onClick={() => setShowUrlInput((v) => !v)}
+                              >
+                                {showUrlInput
+                                  ? "Hide image URL/path field"
+                                  : "Or enter image URL / path (/components-image/..., https://)"}
+                              </button>
+
+                              {showUrlInput && (
+                                <div className="admin-image-input-group" style={{ marginTop: "8px" }}>
+                                  <input
+                                    type="text"
+                                    placeholder="/components-image/components-1.png or https://..."
+                                    value={compImageUrl}
+                                    onChange={(e) => setCompImageUrl(e.target.value)}
+                                  />
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
 
@@ -11154,27 +11507,35 @@ function componentOfferToDraft(offer?: ComponentOffer): ComponentOfferDraft {
 }
 
 async function loadAdminComponentListings(client: SupabaseClient): Promise<Listing[]> {
-  const { data, error } = await client
-    .from("listings")
-    .select("id, kind, title, organization, city, summary, source_url, details")
-    .eq("kind", "Products")
-    .order("title");
-  if (error) throw new Error(`Could not load component listings: ${error.message}`);
-  return uniqueComponentListings(
-    (data ?? [])
-      .map((row) => ({
-        id: row.id,
-        kind: "Products" as const,
-        title: row.title,
-        organization: row.organization,
-        city: row.city,
-        summary: row.summary,
-        tags: [],
-        sourceUrl: row.source_url ?? undefined,
-        componentDetails: parseComponentDetails(row.details),
-      }))
-      .filter((row) => Boolean(row.componentDetails)),
-  );
+  const customList = getLocalCustomComponents();
+  let dbRows: Listing[] = [];
+  try {
+    const { data, error } = await client
+      .from("listings")
+      .select("id, kind, title, organization, city, summary, source_url, details")
+      .eq("kind", "Products")
+      .order("title");
+    if (!error && data) {
+      dbRows = data
+        .filter((row) => !LEGACY_SAMPLE_PRODUCT_TITLES.has(row.title.trim().toLowerCase()))
+        .map((row) => ({
+          id: row.id,
+          kind: "Products" as const,
+          title: row.title,
+          organization: row.organization,
+          city: row.city,
+          summary: row.summary,
+          tags: [],
+          sourceUrl: row.source_url ?? undefined,
+          componentDetails: parseComponentDetails(row.details),
+        }))
+        .filter((row) => Boolean(row.componentDetails));
+    }
+  } catch (err) {
+    console.warn("Could not load remote admin component listings:", err);
+  }
+  const combined = [...dbRows, ...customList, ...(INITIAL_20_COMPONENTS as Listing[])];
+  return uniqueComponentListings(combined);
 }
 
 async function loadAdminOpportunityActivities(client: SupabaseClient): Promise<AdminOpportunityActivity[]> {

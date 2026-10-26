@@ -4,3 +4,4 @@ dist/
 .env.*
 !.env.example
 server/orders-data.json
+components image/
