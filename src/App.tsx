@@ -260,6 +260,7 @@ declare global {
 
 type Page =
   | "Home"
+  | "AppHome"
   | "Manufacturing"
   | "PCB Design"
   | "Internships"
@@ -369,7 +370,7 @@ interface AdminOrder {
 
 type Listing = {
   id: string;
-  kind: Exclude<Page, "Home" | "Saved" | "Dashboard" | "Admin" | "Cart" | "Checkout" | "PaymentResult" | "Terms" | "Privacy" | "Cookies" | "Delivery">;
+  kind: Exclude<Page, "Home" | "AppHome" | "Saved" | "Dashboard" | "Admin" | "Cart" | "Checkout" | "PaymentResult" | "Terms" | "Privacy" | "Cookies" | "Delivery">;
   title: string;
   organization: string;
   city: string;
@@ -1065,6 +1066,7 @@ function getSupabase(): SupabaseClient | null {
 
 function getPageFromPath(pathname: string): Page {
   const path = pathname.replace(/\/+$/, "").toLowerCase();
+  if (path === "/home" || path === "/app" || path === "/app-home" || path === "/homepage") return "AppHome";
   if (path === "/admin") return "Admin";
   if (path === "/internships") return "Internships";
   if (path === "/training") return "Training";
@@ -1088,6 +1090,7 @@ function getPageFromPath(pathname: string): Page {
 
 function getPathFromPage(p: Page): string {
   switch (p) {
+    case "AppHome": return "/home";
     case "Admin": return "/admin";
     case "Internships": return "/internships";
     case "Training": return "/training";
@@ -1958,6 +1961,11 @@ function App() {
           onEnquire={detailSelection.type === "listing" && !["Projects", "Products", "Internships", "Hackathons"].includes(detailSelection.item.kind) ? () => setEnquiry(detailSelection.item) : undefined}
           onOrder={detailSelection.type === "listing" && detailSelection.item.kind === "Projects" ? () => addProjectToCart(detailSelection.item.id) : undefined}
           onCustomize={detailSelection.type === "listing" && detailSelection.item.kind === "Projects" ? () => openProjectCustomization(detailSelection.item) : undefined}
+        />
+      ) : page === "AppHome" ? (
+        <AppHomepageDedicatedPage
+          navigate={navigate}
+          onOpenAuth={() => setAuthOpen(true)}
         />
       ) : page === "Home" ? (
         <HomePage
@@ -6028,6 +6036,300 @@ export function renderPolicyArticle(
   );
 }
 
+export function AppHomepageDedicatedPage({
+  navigate,
+  onOpenAuth,
+}: {
+  navigate: (page: Page) => void;
+  onOpenAuth: () => void;
+}) {
+  return (
+    <main className="policy-dedicated-page app-homepage-dedicated">
+      <div className="policy-dedicated-container">
+        <header className="policy-dedicated-header">
+          <nav className="policy-breadcrumbs" aria-label="Breadcrumb navigation">
+            <button className="policy-breadcrumb-btn" type="button" onClick={() => navigate("Home")}>
+              <Home size={14} /> Main Platform
+            </button>
+            <span>/</span>
+            <span>Official Information</span>
+            <span>/</span>
+            <strong style={{ color: "#0F1F3D" }}>App Homepage (/home)</strong>
+          </nav>
+
+          <div className="policy-hero-card app-home-hero-card">
+            <div className="policy-hero-badge">
+              <ShieldCheck size={14} /> OFFICIAL APP HOMEPAGE · TECHCIRCUIT HUB
+            </div>
+            <div className="app-home-brand-row">
+              <img className="app-home-logo" src={brandLogo} alt={PLATFORM_NAME} />
+              <div>
+                <h1>Welcome to TechCircuit Hub</h1>
+                <p className="app-home-hero-lead">
+                  TechCircuit Hub is a learning and career development platform for Electronics and Communication Engineering (ECE), VLSI, embedded systems, and IoT students.
+                </p>
+              </div>
+            </div>
+
+            <div className="policy-hero-meta app-home-hero-meta">
+              <span><strong>Platform:</strong> TechCircuit Hub</span>
+              <span>·</span>
+              <span><strong>Domain:</strong> <a href="https://techcircuithub.com" target="_blank" rel="noopener noreferrer">https://techcircuithub.com</a></span>
+              <span>·</span>
+              <span><strong>Official Path:</strong> /home</span>
+              <span>·</span>
+              <span><strong>Support:</strong> <a href="mailto:techcircuith@gmail.com">techcircuith@gmail.com</a></span>
+              <span>·</span>
+              <span><strong>Audience:</strong> ECE, VLSI &amp; Embedded Learners</span>
+            </div>
+
+            <div className="app-home-hero-actions">
+              <button className="button button-primary" onClick={() => navigate("Home")}>
+                Explore Main Platform <ArrowRight size={15} />
+              </button>
+              <button className="button button-outline app-home-outline-btn" onClick={onOpenAuth}>
+                <UserRound size={15} /> Create Student Account / Sign In
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Section 1: What You Can Do */}
+        <section className="app-home-section" aria-labelledby="what-you-can-do-title">
+          <div className="app-home-section-head">
+            <span className="app-home-section-tag">
+              <Sparkles size={13} /> CORE PLATFORM FUNCTIONALITY
+            </span>
+            <h2 id="what-you-can-do-title">What You Can Do</h2>
+            <p className="app-home-section-desc">
+              TechCircuit Hub is built specifically for Electronics and Communication Engineering (ECE), VLSI, embedded systems, and IoT students. Discover all capabilities available on the platform:
+            </p>
+          </div>
+
+          <div className="app-home-features-list">
+            <article className="app-home-feature-item">
+              <div className="app-home-feature-icon" style={{ background: "rgba(255,107,24,0.12)", color: "#ff6b18" }}>
+                <BriefcaseBusiness size={24} />
+              </div>
+              <div className="app-home-feature-body">
+                <h3>Explore internships and career opportunities.</h3>
+                <p>
+                  Access verified core hardware, semiconductor, VLSI design, firmware engineering, and robotics internship leads.
+                  Students can review verified role requirements, company profiles, stipends, and apply directly through source links.
+                </p>
+                <button className="app-home-link-btn" type="button" onClick={() => navigate("Internships")}>
+                  Browse Internships <ArrowRight size={14} />
+                </button>
+              </div>
+            </article>
+
+            <article className="app-home-feature-item">
+              <div className="app-home-feature-icon" style={{ background: "rgba(14,165,233,0.12)", color: "#0ea5e9" }}>
+                <GraduationCap size={24} />
+              </div>
+              <div className="app-home-feature-body">
+                <h3>Discover technical training programs and hackathons.</h3>
+                <p>
+                  Find structured technical training in VLSI front-end/back-end, embedded C, RTOS, PCB layout, FPGA Verilog, and IoT.
+                  Compete in premier hardware hackathons and design challenges with step-by-step participation details.
+                </p>
+                <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", marginTop: "4px" }}>
+                  <button className="app-home-link-btn" type="button" onClick={() => navigate("Training")}>
+                    Technical Training <ArrowRight size={14} />
+                  </button>
+                  <button className="app-home-link-btn" type="button" onClick={() => navigate("Hackathons")}>
+                    Hackathons <ArrowRight size={14} />
+                  </button>
+                </div>
+              </div>
+            </article>
+
+            <article className="app-home-feature-item">
+              <div className="app-home-feature-icon" style={{ background: "rgba(99,102,241,0.12)", color: "#6366f1" }}>
+                <CircuitBoard size={24} />
+              </div>
+              <div className="app-home-feature-body">
+                <h3>Access educational resources and electronics projects.</h3>
+                <p>
+                  Access end-to-end verified electronics and embedded hardware project packages with complete schematic diagrams,
+                  tested firmware source code, component BOMs, and technical documentation for semester and capstone projects.
+                </p>
+                <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", marginTop: "4px" }}>
+                  <button className="app-home-link-btn" type="button" onClick={() => navigate("Projects")}>
+                    Projects for Sale &amp; Customization <ArrowRight size={14} />
+                  </button>
+                  <button className="app-home-link-btn" type="button" onClick={() => navigate("Learn")}>
+                    Study Resources &amp; Guides <ArrowRight size={14} />
+                  </button>
+                </div>
+              </div>
+            </article>
+
+            <article className="app-home-feature-item">
+              <div className="app-home-feature-icon" style={{ background: "rgba(16,185,129,0.12)", color: "#10b981" }}>
+                <Cpu size={24} />
+              </div>
+              <div className="app-home-feature-body">
+                <h3>Explore electronic components and compare available options.</h3>
+                <p>
+                  Search and compare electronic components including microcontrollers (STM32, ESP32, Arduino, PIC), sensors,
+                  wireless communication modules, and power ICs with official datasheets, pinouts, and pricing across trusted vendors.
+                </p>
+                <button className="app-home-link-btn" type="button" onClick={() => navigate("Products")}>
+                  Compare Electronic Components <ArrowRight size={14} />
+                </button>
+              </div>
+            </article>
+
+            <article className="app-home-feature-item app-home-feature-highlight">
+              <div className="app-home-feature-icon" style={{ background: "rgba(249,115,22,0.14)", color: "#f97316" }}>
+                <UserRound size={24} />
+              </div>
+              <div className="app-home-feature-body">
+                <h3>Create an account to access student features and track your learning journey.</h3>
+                <p>
+                  Create a secure student account to bookmark listings, manage applications, track project kit orders,
+                  and access personalized student dashboards tailored to your branch of engineering.
+                </p>
+                <button className="button button-primary" type="button" onClick={onOpenAuth} style={{ marginTop: "6px" }}>
+                  Create Student Account <ArrowRight size={14} />
+                </button>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        {/* Section 2: User Data & Authentication Transparency (Google Cloud Console Requirement) */}
+        <section className="app-home-section" aria-labelledby="data-transparency-title">
+          <div className="app-home-transparency-card">
+            <div className="app-home-transparency-head">
+              <div className="app-home-shield-icon">
+                <ShieldCheck size={26} />
+              </div>
+              <div>
+                <span className="app-home-section-tag" style={{ color: "#059669", background: "rgba(5, 150, 105, 0.1)", border: "1px solid rgba(5, 150, 105, 0.25)" }}>
+                  USER DATA &amp; OAUTH PRIVACY TRANSPARENCY
+                </span>
+                <h2 id="data-transparency-title" style={{ margin: "4px 0 6px", fontSize: "22px", color: "#0f172a" }}>
+                  How TechCircuit Hub Collects and Protects User Data
+                </h2>
+                <p style={{ margin: 0, color: "#475569", fontSize: "14px", lineHeight: "1.6" }}>
+                  In accordance with Google API Services User Data Policy and international data privacy standards, here is how we collect, use, and protect your data:
+                </p>
+              </div>
+            </div>
+
+            <div className="app-home-transparency-grid">
+              <div className="app-home-transparency-box">
+                <h4>1. What Data We Request</h4>
+                <p>
+                  When you sign in using Google or email, we only request basic profile information:
+                  <strong> your full name, email address, and profile photo</strong>. We never request access to your contacts, Google Drive, calendar, or private files.
+                </p>
+              </div>
+
+              <div className="app-home-transparency-box">
+                <h4>2. Purpose of User Data</h4>
+                <p>
+                  User data is used strictly to authenticate your account, maintain your personalized bookmarks, record your learning progress, and fulfill hardware kit orders.
+                </p>
+              </div>
+
+              <div className="app-home-transparency-box">
+                <h4>3. No Data Selling or Ads</h4>
+                <p>
+                  We <strong>never sell, rent, or trade your personal information</strong> with third-party advertisers or data brokers. Data is processed solely for providing the educational service.
+                </p>
+              </div>
+
+              <div className="app-home-transparency-box">
+                <h4>4. User Control &amp; Deletion</h4>
+                <p>
+                  You have full rights to inspect, update, or request permanent deletion of your account and associated data at any time through account settings or by emailing <a href="mailto:techcircuith@gmail.com">techcircuith@gmail.com</a>.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Section 3: Privacy and Terms */}
+        <section className="app-home-section" aria-labelledby="privacy-terms-title">
+          <div className="app-home-policy-box">
+            <h2 id="privacy-terms-title">Privacy and Terms</h2>
+            <p>
+              We respect your privacy and explain how account information is collected, used, and protected in our Privacy Policy.
+            </p>
+
+            <div className="app-home-policy-links-grid">
+              <div className="app-home-policy-item">
+                <div className="app-home-policy-icon">
+                  <FileText size={20} />
+                </div>
+                <div className="app-home-policy-content">
+                  <strong>Privacy Policy:</strong>
+                  <a
+                    href="https://techcircuithub.com/privacy-policy"
+                    onClick={(e) => { e.preventDefault(); navigate("Privacy"); }}
+                    className="app-home-policy-anchor"
+                  >
+                    https://techcircuithub.com/privacy-policy <ArrowUpRight size={14} />
+                  </a>
+                  <p>Read how account credentials, order transactions, and user data are securely handled.</p>
+                </div>
+              </div>
+
+              <div className="app-home-policy-item">
+                <div className="app-home-policy-icon">
+                  <Scale size={20} />
+                </div>
+                <div className="app-home-policy-content">
+                  <strong>Terms of Service:</strong>
+                  <a
+                    href="https://techcircuithub.com/terms"
+                    onClick={(e) => { e.preventDefault(); navigate("Terms"); }}
+                    className="app-home-policy-anchor"
+                  >
+                    https://techcircuithub.com/terms <ArrowUpRight size={14} />
+                  </a>
+                  <p>Read terms governing platform use, intellectual property, project orders, and user rights.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Section 4: Domain & Organization Verification */}
+        <section className="app-home-section">
+          <div className="app-home-domain-card">
+            <div className="app-home-domain-head">
+              <CheckCircle2 size={20} className="text-success" />
+              <strong>Verified Domain &amp; Publisher Credentials</strong>
+            </div>
+            <div className="app-home-domain-grid">
+              <div>
+                <small>APPLICATION NAME</small>
+                <span>TechCircuit Hub</span>
+              </div>
+              <div>
+                <small>PRIMARY DOMAIN</small>
+                <span>https://techcircuithub.com</span>
+              </div>
+              <div>
+                <small>APP HOMEPAGE</small>
+                <span>https://techcircuithub.com/home</span>
+              </div>
+              <div>
+                <small>DEVELOPER / SUPPORT</small>
+                <span>techcircuith@gmail.com</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 export function PolicyDedicatedPage({
   policy,
   navigate,
@@ -6285,6 +6587,7 @@ function Footer({
           </div>
           <div>
             <strong>POLICIES &amp; LEGAL</strong>
+            <button type="button" onClick={() => navigate("AppHome")}>App Homepage (/home)</button>
             <button type="button" onClick={() => navigate("Terms")}>Terms &amp; Conditions</button>
             <button type="button" onClick={() => navigate("Privacy")}>Privacy Policy</button>
             <button type="button" onClick={() => navigate("Cookies")}>Cookie Policy</button>
