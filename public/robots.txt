@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /cart
+Disallow: /checkout
+Disallow: /payment-result
+Disallow: /dashboard
+
+Sitemap: https://techcircuithub.com/sitemap.xml
