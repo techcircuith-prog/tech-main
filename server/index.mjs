@@ -6,6 +6,14 @@ import { URL } from "node:url";
 const rawPrices = readFileSync(new URL("../shared/project-prices.json", import.meta.url), "utf8");
 const prices = JSON.parse(rawPrices);
 
+let componentPrices = {};
+try {
+  const rawCompPrices = readFileSync(new URL("../shared/component-prices.json", import.meta.url), "utf8");
+  componentPrices = JSON.parse(rawCompPrices);
+} catch (e) {
+  console.warn("Could not load component-prices.json:", e.message);
+}
+
 const VALID_INDIAN_STATES = new Set([
   "Andaman and Nicobar Islands",
   "Andhra Pradesh",
@@ -348,14 +356,20 @@ const server = createServer(async (request, response) => {
         const SPECIAL_OFFER_ID = "special-offer-dc-fan-kit";
         const SPECIAL_OFFER_PRICE = 20;
 
-        const projectPrices = body.projectIds.map((id) => {
+        const projectPrices = body.projectIds.map((id, idx) => {
           if (id === SPECIAL_OFFER_ID) {
             return SPECIAL_OFFER_PRICE;
+          }
+          if (componentPrices[id] !== undefined) {
+            return componentPrices[id];
           }
           const match = typeof id === "string" && /(?:sample-)?project-(\d{1,2})$/.exec(id);
           const num = match ? Number(match[1]) : 0;
           if (num >= 1 && num <= prices.length) {
             return prices[num - 1] || 2999;
+          }
+          if (body.items?.[idx]?.price !== undefined) {
+            return Number(body.items[idx].price) || 2999;
           }
           return 2999;
         });
@@ -439,9 +453,11 @@ const server = createServer(async (request, response) => {
           shipping_address: shippingAddress,
           items: body.projectIds.map((id, idx) => ({
             project_id: id,
-            title: id === SPECIAL_OFFER_ID ? "Mini DC Motor & Fan Circuit Kit" : (body.projectTitles?.[idx] || `Hardware Project Kit`),
+            title: id === SPECIAL_OFFER_ID
+              ? "Mini DC Motor & Fan Circuit Kit"
+              : (body.items?.[idx]?.title || body.projectTitles?.[idx] || (componentPrices[id] !== undefined ? `ECE Component #${id.replace("ece-comp-", "")}` : `Hardware Project Kit`)),
             price: projectPrices[idx],
-            qty: 1,
+            qty: body.items?.[idx]?.qty || 1,
           })),
           subtotal,
           shipping_charges: shippingCharges,

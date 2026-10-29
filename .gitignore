@@ -5,3 +5,4 @@ dist/
 !.env.example
 server/orders-data.json
 components image/
+*.tsbuildinfo

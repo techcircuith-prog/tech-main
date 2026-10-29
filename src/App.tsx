@@ -75,13 +75,14 @@ import hackathonOpportunityImage from "../home image/card 3.png";
 import resourceImage from "../home image/card 5.png";
 import projectPricesInRupees from "../shared/project-prices.json";
 import {
-  INITIAL_20_COMPONENTS,
-  LEGACY_SAMPLE_PRODUCT_TITLES,
+  ECE_COMPONENTS_CATALOG,
+  COMPONENT_CATEGORIES,
 } from "./data/componentsCatalog";
 
 const PLATFORM_NAME = "TechCircuit Hub";
 const PLATFORM_TAGLINE = "Discover. Learn. Build. Innovate.";
 const PROJECT_CUSTOMIZATION_FORM_URL = "https://forms.gle/De35WLbL98SU2kXF7";
+const COMPONENT_CUSTOMIZATION_FORM_URL = "https://forms.gle/De35WLbL98SU2kXF7"; // User will update with Google Form link afterwards
 const PENDING_ORDER_KEY = "techcircuit-pending-order:";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const STUDENT_INTERESTS = [
@@ -388,6 +389,13 @@ type Listing = {
   components?: string[];
   updated?: string;
   componentDetails?: ComponentDetails;
+  sNo?: number;
+  category?: string;
+  specification?: string;
+  quantity?: number;
+  unit?: string;
+  price?: number;
+  notes?: string;
 };
 
 type TrackableOpportunityKind = Extract<Listing["kind"], "Internships" | "Training" | "Hackathons">;
@@ -998,7 +1006,7 @@ const showcaseSlides: { title: string; description: string; action: string; page
   { title: "Get to know your components", description: "Explore essential ECE components, understand their working and build real-world circuits.", action: "Browse components", page: "Products" }, // card 6: ECE Components
 ];
 
-const intro: Record<Listing["kind"], { eyebrow?: string; title: string; description: string }> = {
+export const intro: Record<Listing["kind"], { eyebrow?: string; title: string; description: string }> = {
   Manufacturing: {
     eyebrow: "MANUFACTURING DIRECTORY",
     title: "Find a partner to make it real.",
@@ -1465,11 +1473,9 @@ function App() {
   }, []);
 
   const listings = useMemo(() => {
-    const customList = getLocalCustomComponents();
-    const filteredRemote = remoteListings.filter(
-      (item) => !(item.kind === "Products" && LEGACY_SAMPLE_PRODUCT_TITLES.has(item.title.trim().toLowerCase()))
-    );
-    const all = [...filteredRemote, ...customList, ...(INITIAL_20_COMPONENTS as Listing[]), ...catalog];
+    const customList = getLocalCustomComponents().filter((item) => item.kind !== "Products");
+    const filteredRemote = remoteListings.filter((item) => item.kind !== "Products");
+    const all = [...filteredRemote, ...customList, ...(ECE_COMPONENTS_CATALOG as Listing[]), ...catalog];
     const seenIds = new Set<string>();
     const seenKeys = new Set<string>();
     const result: Listing[] = [];
@@ -1840,7 +1846,7 @@ function App() {
 
   function addProjectToCart(id: string) {
     setCartIds((current) => current.includes(id) ? current : [...current, id]);
-    showToast("Project kit added to cart! 🛒", "success");
+    showToast("Added to cart! 🛒", "success");
     navigate("Cart");
   }
 
@@ -1959,7 +1965,7 @@ function App() {
           onSave={() => detailSelection.type === "listing" ? toggleSaved(detailSelection.item.id) : toggleSaved(resourceId(detailSelection.item.title))}
           onTrackOpportunity={detailSelection.type === "listing" ? prepareOpportunityFollowUp : undefined}
           onEnquire={detailSelection.type === "listing" && !["Projects", "Products", "Internships", "Hackathons"].includes(detailSelection.item.kind) ? () => setEnquiry(detailSelection.item) : undefined}
-          onOrder={detailSelection.type === "listing" && detailSelection.item.kind === "Projects" ? () => addProjectToCart(detailSelection.item.id) : undefined}
+          onOrder={detailSelection.type === "listing" && (detailSelection.item.kind === "Projects" || detailSelection.item.kind === "Products") ? () => addProjectToCart(detailSelection.item.id) : undefined}
           onCustomize={detailSelection.type === "listing" && detailSelection.item.kind === "Projects" ? () => openProjectCustomization(detailSelection.item) : undefined}
         />
       ) : page === "AppHome" ? (
@@ -2023,7 +2029,22 @@ function App() {
       ) : page === "Saved" ? (
         <SavedPage listings={listings} savedIds={savedIds} toggleSaved={toggleSaved} setEnquiry={setEnquiry} addProjectToCart={addProjectToCart} onViewListing={openListingDetails} onViewResource={openResourceDetails} />
       ) : page === "Products" ? (
-        <ComponentCatalogPage listings={listings} />
+        <ComponentCatalogPage
+          listings={listings}
+          cartIds={cartIds}
+          onAddToCart={(id) => {
+            setCartIds((current) => current.includes(id) ? current : [...current, id]);
+            showToast("Component added to cart! 🛒", "success");
+          }}
+          onBuyNow={(id) => {
+            setCartIds((current) => current.includes(id) ? current : [...current, id]);
+            showToast("Component added to cart! 🛒", "success");
+            navigate("Cart");
+          }}
+          onGoToCart={() => navigate("Cart")}
+          onGoToCheckout={() => navigate("Cart")}
+          onViewListing={openListingDetails}
+        />
       ) : page === "Terms" || page === "Privacy" || page === "Cookies" || page === "Delivery" ? (
         <PolicyDedicatedPage
           policy={page === "Terms" ? "terms" : page === "Privacy" ? "privacy" : page === "Cookies" ? "cookie" : "delivery"}
@@ -2121,198 +2142,6 @@ function App() {
   );
 }
 
-function HomeWhatsNewSection({
-  listings,
-  navigate,
-  onViewListing,
-  addProjectToCart,
-}: {
-  listings: Listing[];
-  navigate: (page: Page) => void;
-  onViewListing: (listing: Listing) => void;
-  addProjectToCart: (id: string) => void;
-}) {
-  // Exactly 4 curated fresh arrivals (2 columns x 2 rows)
-  const freshArrivals = useMemo(() => {
-    const topComponent = listings.find((item) => item.kind === "Products" && item.componentDetails);
-    const topProjects = listings.filter((item) => item.kind === "Projects" && item.id !== SPECIAL_OFFER_PROJECT_ID && item.imageUrl).slice(0, 2);
-    const topOpportunity = listings.find((item) => (item.kind === "Internships" || item.kind === "Hackathons" || item.kind === "Training") && item.sourceUrl);
-
-    const items: Listing[] = [];
-    if (topComponent) items.push(topComponent);
-    items.push(...topProjects);
-    if (topOpportunity) items.push(topOpportunity);
-
-    if (items.length < 4) {
-      const remaining = listings.filter((l) => !items.some((i) => i.id === l.id) && l.id !== SPECIAL_OFFER_PROJECT_ID).slice(0, 4 - items.length);
-      items.push(...remaining);
-    }
-    return items.slice(0, 4);
-  }, [listings]);
-
-  return (
-    <section className="whats-new-section" aria-label="All Fresh Arrivals in TechCircuit">
-      <div className="whats-new-hero-banner">
-        <div className="whats-new-hero-top">
-          <div className="whats-new-badge-row">
-            <span className="whats-new-pulse-dot" />
-            <span className="whats-new-badge-label">JUST ARRIVED</span>
-            <span className="whats-new-pill">ALL FRESH ARRIVALS</span>
-          </div>
-          <div className="whats-new-header-flex">
-            <div>
-              <h2 className="whats-new-heading">
-                All Fresh Arrivals in <span>TechCircuit</span>
-              </h2>
-              <p className="whats-new-lead">
-                Newly cataloged hardware kits, verified ECE components &amp; student opportunities.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="whats-new-more-link header-explore-btn"
-              onClick={() => navigate("Projects")}
-            >
-              Explore all <ArrowRight size={14} />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 2 Column x 2 Row Grid */}
-      <div className="whats-new-grid whats-new-2x2-grid" role="region" aria-label="Fresh arrivals list">
-        {freshArrivals.map((item) => {
-          const isComponent = item.kind === "Products";
-          const isProject = item.kind === "Projects";
-          const isOpportunity = item.kind === "Internships" || item.kind === "Hackathons" || item.kind === "Training";
-
-          const cardImg =
-            item.componentDetails?.imageUrl ||
-            item.imageUrl ||
-            (item.kind === "Internships"
-              ? internshipOpportunityImage
-              : item.kind === "Hackathons"
-              ? hackathonOpportunityImage
-              : item.kind === "Training"
-              ? trainingOpportunityImage
-              : undefined);
-
-          const digikeyOffer = item.componentDetails?.offers?.find((o) => o.seller.toLowerCase().includes("digikey"));
-          const mouserOffer = item.componentDetails?.offers?.find((o) => o.seller.toLowerCase().includes("mouser"));
-          const primaryOffer = digikeyOffer || mouserOffer || item.componentDetails?.offers?.[0];
-
-          return (
-            <article key={item.id} className="whats-new-card">
-              <div className="whats-new-card-media">
-                {cardImg ? (
-                  <img src={cardImg} alt={item.title} loading="lazy" decoding="async" />
-                ) : (
-                  <div className="whats-new-media-fallback">
-                    {isComponent ? <Cpu size={24} /> : isProject ? <CircuitBoard size={24} /> : <GraduationCap size={24} />}
-                  </div>
-                )}
-                <div className="whats-new-card-badges">
-                  <span className={`whats-new-type-badge type-${item.kind.toLowerCase()}`}>
-                    {isComponent ? "Component" : isProject ? "Project" : item.kind}
-                  </span>
-                  <span className="whats-new-new-badge">
-                    <Sparkles size={9} /> NEW
-                  </span>
-                </div>
-              </div>
-
-              <div className="whats-new-card-body">
-                <div className="whats-new-card-org">
-                  {isComponent ? (
-                    <span>{item.organization || item.componentDetails?.category || "ECE Component"}</span>
-                  ) : isProject ? (
-                    <span>{item.projectCategory || "Hardware Kit"}</span>
-                  ) : (
-                    <span>{item.organization || item.city}</span>
-                  )}
-                </div>
-
-                <h3 className="whats-new-card-title" title={item.title}>
-                  {item.title}
-                </h3>
-
-                {/* Specific metadata / price display */}
-                <div className="whats-new-card-meta">
-                  {isComponent && (
-                    <div className="whats-new-price-chips">
-                      {digikeyOffer && (
-                        <span className="price-chip digikey-chip">DigiKey: ₹{digikeyOffer.price.toFixed(0)}</span>
-                      )}
-                      {mouserOffer && (
-                        <span className="price-chip mouser-chip">Mouser: ₹{mouserOffer.price.toFixed(0)}</span>
-                      )}
-                      {!digikeyOffer && !mouserOffer && primaryOffer && (
-                        <span className="price-chip">{primaryOffer.seller}: ₹{primaryOffer.price.toFixed(0)}</span>
-                      )}
-                      {(!item.componentDetails?.offers || item.componentDetails.offers.length === 0) && (
-                        <span className="price-chip">In Stock</span>
-                      )}
-                    </div>
-                  )}
-
-                  {isProject && (
-                    <div className="whats-new-price-chips">
-                      <span className="price-chip project-kit-chip">
-                        {item.projectPrice ? formatPrice(item.projectPrice) : "Kit Available"}
-                      </span>
-                    </div>
-                  )}
-
-                  {isOpportunity && (
-                    <div className="whats-new-price-chips">
-                      <span className="price-chip opp-chip">
-                        {item.tags[0] || item.city || "Verified"}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Card actions */}
-                <div className="whats-new-card-actions">
-                  {isComponent && (
-                    <button
-                      type="button"
-                      className="button button-primary button-small whats-new-btn-full"
-                      onClick={() => onViewListing(item)}
-                    >
-                      Compare Prices <ArrowRight size={11} />
-                    </button>
-                  )}
-
-                  {isProject && (
-                    <button
-                      type="button"
-                      className="button button-primary button-small whats-new-btn-full"
-                      onClick={() => addProjectToCart(item.id)}
-                    >
-                      Order Kit <ShoppingCart size={11} />
-                    </button>
-                  )}
-
-                  {isOpportunity && (
-                    <button
-                      type="button"
-                      className="button button-primary button-small whats-new-btn-full"
-                      onClick={() => onViewListing(item)}
-                    >
-                      View &amp; Apply <ArrowRight size={11} />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </article>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function HomePage({
   navigate,
   startExplore,
@@ -2365,20 +2194,12 @@ function HomePage({
             <p>Learn, build and grow with real projects, expert guidance and industry-ready skills.</p>
             <div className="home-hero-actions">
               <button className="button button-primary" onClick={startExplore}>Start exploring <ArrowRight size={16} /></button>
-              <button className="home-text-link" onClick={() => navigate("Projects")}>Buy a project <ArrowRight size={16} /></button>
             </div>
           </div>
         </div>
       </section>
 
       <section className="home-content">
-        <HomeWhatsNewSection
-          listings={listings}
-          navigate={navigate}
-          onViewListing={onViewListing}
-          addProjectToCart={addProjectToCart}
-        />
-
         <div
             className="home-showcase"
             role="region"
@@ -2548,8 +2369,8 @@ function DirectoryPage({
   setCity,
   savedIds,
   toggleSaved,
-  compareIds,
-  toggleCompare,
+  compareIds: _compareIds,
+  toggleCompare: _toggleCompare,
   setEnquiry,
   addProjectToCart,
   onViewListing,
@@ -2574,7 +2395,6 @@ function DirectoryPage({
   toggleSaved: (id: string) => void;
   onTrackOpportunity?: (listing: Listing) => void;
 }) {
-  const info = intro[page];
   const isLearn = page === "Learn";
   const isProjects = page === "Projects";
   const [projectView, setProjectView] = useState<"ready-made" | "customize">("ready-made");
@@ -2605,15 +2425,6 @@ function DirectoryPage({
   }, [page]);
   return (
     <main className={`directory-page${isProjects ? " projects-directory" : ""}`}>
-      <section className="directory-hero">
-        <div className="directory-hero-copy">
-          {info.eyebrow && <div className="eyebrow"><span className="eyebrow-line" /> {info.eyebrow}</div>}
-          <h1>{info.title}</h1><p>{info.description}</p>
-          {page === "Internships" && <div className="sourcing-note"><ShieldCheck size={17} /><span>Source-linked opportunity leads. Confirm the exact role, eligibility, stipend, fees and application status before applying.</span></div>}
-        </div>
-        <div className="directory-hero-art"><div className="hero-art-label">{page === "Projects" ? "RESEARCH / BUILD / REPEAT" : "DISCOVER / COMPARE / CONNECT"}</div><div className="directory-art-chip">{isProjects ? <Cpu size={55} /> : page === "Internships" || page === "Training" ? <GraduationCap size={55} /> : page === "Products" ? <CircuitBoard size={55} /> : <Layers3 size={55} />}</div><div className="art-small-label">{PLATFORM_NAME.toUpperCase()} <span>•</span> FIELD NOTES {new Date().getFullYear()}</div></div>
-      </section>
-
       {isLearn ? (
         <section className="directory-content">
           <div className="project-mode-tabs" aria-label="Learning resource views">
@@ -2682,11 +2493,8 @@ function DirectoryPage({
           {(page === "Internships" || page === "Products") && filtered.length === 0 ? <EmptyState page={page} /> : filtered.length > 0 ? (
             <>
               <div className={`listing-grid${isProjects ? " projects-listing-grid" : ""}${page === "Training" ? " training-listing-grid" : ""}${page === "Internships" || page === "Hackathons" ? " opportunity-listing-grid" : ""}`}>
-                {filtered.map((item, index) => <ListingCard key={item.id} listing={item} index={index} isSaved={savedIds.includes(item.id)} onSave={() => toggleSaved(item.id)} compareIds={compareIds} onCompare={() => toggleCompare(item.id)} onEnquire={() => setEnquiry(item)} isProjects={isProjects} canCompare={page === "Products"} onOrderNow={() => addProjectToCart(item.id)} onViewDetails={() => onViewListing(item)} onTrackOpportunity={onTrackOpportunity} />)}
+                {filtered.map((item, index) => <ListingCard key={item.id} listing={item} index={index} isSaved={savedIds.includes(item.id)} onSave={() => toggleSaved(item.id)} compareIds={[]} onCompare={() => undefined} onEnquire={() => setEnquiry(item)} isProjects={isProjects} canCompare={false} onOrderNow={() => addProjectToCart(item.id)} onViewDetails={() => onViewListing(item)} onTrackOpportunity={onTrackOpportunity} />)}
               </div>
-              {page === "Products" && selectedComparison(filtered, compareIds).length > 1 && (
-                <section className="comparison-section" id="comparison"><div className="eyebrow"><span className="eyebrow-line" /> COMPONENT COMPARISON</div><h2>Compare your component shortlist.</h2><div className="comparison-table"><div className="comparison-row comparison-head"><strong>Component</strong>{selectedComparison(filtered, compareIds).map((item) => <strong key={item.id}>{item.title}</strong>)}</div><div className="comparison-row"><span>Category</span>{selectedComparison(filtered, compareIds).map((item) => <span key={item.id}>{item.tags.join(", ")}</span>)}</div><div className="comparison-row"><span>Organization</span>{selectedComparison(filtered, compareIds).map((item) => <span key={item.id}>{item.organization}</span>)}</div><div className="comparison-row"><span>Location</span>{selectedComparison(filtered, compareIds).map((item) => <span key={item.id}>{item.city}</span>)}</div></div></section>
-              )}
             </>
           ) : <EmptyState page={page} />}
           {opportunityFields[page] && filtered.length > 0 && <p className="listing-footnote"><Filter size={13} /> Review {opportunityFields[page].toLowerCase()} before you enquire.</p>}
@@ -2699,9 +2507,6 @@ function DirectoryPage({
   );
 }
 
-function selectedComparison(listings: Listing[], ids: string[]) {
-  return listings.filter((item) => ids.includes(item.id));
-}
 
 function resourceId(title: string) {
   return `resource:${title}`;
@@ -3035,6 +2840,7 @@ function ListingDetailPage({
 
   const listing = selection.item;
   const isProject = listing.kind === "Projects";
+  const isComponent = listing.kind === "Products";
   const isOpportunity = ["Internships", "Training", "Hackathons"].includes(listing.kind);
   const detailImage =
     listing.imageUrl ||
@@ -3045,8 +2851,6 @@ function ListingDetailPage({
       ? hackathonOpportunityImage
       : listing.kind === "Training"
       ? trainingOpportunityImage
-      : listing.kind === "Products"
-      ? (homeShowcaseImages[5] || internshipOpportunityImage)
       : listing.kind === "PCB Design"
       ? (homeShowcaseImages[0] || internshipOpportunityImage)
       : listing.kind === "Manufacturing"
@@ -3055,6 +2859,8 @@ function ListingDetailPage({
 
   const eyebrowCategory = isProject
     ? (listing.projectCategory ? `${listing.projectCategory.toUpperCase()}-BASED PROJECT` : "MICROCONTROLLER-BASED PROJECT")
+    : isComponent
+    ? (listing.category ? `${listing.category.toUpperCase()} • ECE LAB COMPONENT` : "ECE LAB COMPONENT")
     : `${listing.kind.toUpperCase()}-BASED OPPORTUNITY`;
 
   return (
@@ -3075,26 +2881,29 @@ function ListingDetailPage({
             </div>
             <h1 className="detail-mockup-title">{listing.title}</h1>
             <div className="detail-mockup-byline">
-              <span>{isProject ? "Hardware Project Kit" : listing.organization}</span>
+              <span>{isProject ? "Hardware Project Kit" : isComponent ? (listing.category || "Lab Component") : listing.organization}</span>
               <span className="byline-bullet">•</span>
-              <span>{listing.mode || "Ready to ship"}</span>
+              <span>{isComponent ? (listing.unit ? `Pack of ${listing.quantity || 1} ${listing.unit}` : "Lab Verified") : (listing.mode || "Ready to ship")}</span>
               <span className="byline-bullet">•</span>
-              <span>{listing.city || "All India"}</span>
+              <span>{listing.city || (isComponent ? "Chennai / Pan-India Delivery" : "All India")}</span>
             </div>
-            {isProject && listing.projectPrice !== undefined && (
-              <div className="detail-mockup-price">{formatPrice(listing.projectPrice)}</div>
+            {(isProject || isComponent) && (listing.price !== undefined || listing.projectPrice !== undefined) && (
+              <div className="detail-mockup-price">
+                {formatPrice(listing.price ?? listing.projectPrice ?? 0)}
+                {isComponent && listing.unit ? <span style={{ fontSize: "16px", fontWeight: "normal", color: "#64748b", marginLeft: "6px" }}>/{listing.unit}</span> : null}
+              </div>
             )}
             <p className="detail-mockup-summary">{listing.summary}</p>
             
             {/* Main Action Buttons Row matching mockup */}
             <div className="detail-mockup-actions-row">
-              {onOrder && isProject ? (
-                <button className="detail-mockup-btn-primary" type="button" onClick={onOrder}>
+              {onOrder && (isProject || isComponent) ? (
+                <button className="detail-mockup-btn-primary button-order-now" type="button" onClick={onOrder}>
                   <ShoppingCart size={18} />
                   <span>Order Now</span>
                   <ArrowRight size={16} />
                 </button>
-              ) : listing.sourceUrl && !isProject ? (
+              ) : listing.sourceUrl && !isProject && !isComponent ? (
                 <a
                   className="detail-mockup-btn-primary"
                   href={listing.sourceUrl}
@@ -3105,7 +2914,7 @@ function ListingDetailPage({
                   <span>{listing.kind === "Internships" ? "Apply Now" : listing.kind === "Training" ? "Enroll Now" : listing.kind === "Hackathons" ? "Register Now" : "Visit Portal"}</span>
                   <ArrowRight size={16} />
                 </a>
-              ) : onEnquire && !isProject ? (
+              ) : onEnquire && !isProject && !isComponent ? (
                 <button className="detail-mockup-btn-primary" type="button" onClick={onEnquire}>
                   <span>Enquire Now</span>
                   <ArrowRight size={16} />
@@ -3129,6 +2938,27 @@ function ListingDetailPage({
                 <div className="detail-kit-notice">
                   <Truck size={16} />
                   <span><strong>Built to order (~7 days delivery).</strong> Handcrafted hardware kit assembled by workshop engineers, firmware pre-flashed, with schematics &amp; documentation.</span>
+                </div>
+              )}
+
+              {isComponent && (
+                <div className="detail-kit-notice">
+                  <ShieldCheck size={16} />
+                  <span><strong>MSAJCE ECE Lab Verified Component.</strong> Genuine lab-grade hardware tested for institutional university laboratories, student project builds, and institutional wholesale procurement.</span>
+                </div>
+              )}
+
+              {isComponent && listing.specification && (
+                <div className="detail-components-box">
+                  <h4>Technical Specifications</h4>
+                  <p style={{ margin: "6px 0 0", color: "#334155", fontSize: "14.5px" }}>{listing.specification}</p>
+                </div>
+              )}
+
+              {isComponent && listing.notes && (
+                <div className="detail-components-box" style={{ marginTop: "12px" }}>
+                  <h4>Procurement &amp; Usage Notes</h4>
+                  <p style={{ margin: "6px 0 0", color: "#475569", fontSize: "14px" }}>{listing.notes}</p>
                 </div>
               )}
 
@@ -3226,146 +3056,521 @@ function parseComponentDetails(value: unknown): ComponentDetails | undefined {
 }
 
 function uniqueComponentListings(listings: Listing[]): Listing[] {
-  const productsByMpn = new Map<string, Listing>();
+  const productsById = new Map<string, Listing>();
   for (const product of listings) {
-    const details = product.componentDetails;
-    if (!details) continue;
-    const mpn = details.mpn.trim().toLowerCase();
-    const existing = productsByMpn.get(mpn);
-    if (!existing?.componentDetails) {
-      productsByMpn.set(mpn, product);
-      continue;
+    if (!product || product.kind !== "Products") continue;
+    if (!productsById.has(product.id)) {
+      productsById.set(product.id, product);
     }
-
-    const offers = [...existing.componentDetails.offers];
-    for (const offer of details.offers) {
-      const existingOfferIndex = offers.findIndex((candidate) =>
-        candidate.sellerUrl === offer.sellerUrl
-        && candidate.currency === offer.currency
-        && candidate.quantity === offer.quantity,
-      );
-      if (existingOfferIndex === -1) {
-        offers.push(offer);
-      } else if (offer.checkedAt > offers[existingOfferIndex].checkedAt) {
-        offers[existingOfferIndex] = offer;
-      }
-    }
-    productsByMpn.set(mpn, {
-      ...existing,
-      componentDetails: { ...existing.componentDetails, offers },
-    });
   }
-  return [...productsByMpn.values()];
+  return [...productsById.values()];
 }
 
-function ComponentCatalogPage({ listings }: { listings: Listing[] }) {
+function ComponentCatalogPage({
+  listings: _listings,
+  cartIds,
+  onAddToCart,
+  onBuyNow,
+  onGoToCart,
+  onGoToCheckout,
+  onViewListing,
+}: {
+  listings: Listing[];
+  cartIds: string[];
+  onAddToCart: (id: string) => void;
+  onBuyNow: (id: string) => void;
+  onGoToCart: () => void;
+  onGoToCheckout: () => void;
+  onViewListing?: (listing: Listing) => void;
+}) {
+  const [activeTab, setActiveTab] = useState<"catalog" | "custom">("catalog");
+  const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [searchInput, setSearchInput] = useState("");
-  const [query, setQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"default" | "price-asc" | "price-desc" | "name">("default");
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 4;
-  const products = uniqueComponentListings(
-    listings.filter((listing) => listing.kind === "Products" && listing.componentDetails),
-  );
-  const matchingProducts = products.filter((product) => {
-    if (!query) return true;
-    const details = product.componentDetails;
-    const searchable = `${product.title} ${product.organization} ${details?.mpn ?? ""} ${details?.category ?? ""}`.toLowerCase();
-    return searchable.includes(query.toLowerCase());
-  });
+  const pageSize = 16;
 
-  function search(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const normalizedQuery = searchInput.trim().replace(/\s+/g, " ");
-    setQuery(normalizedQuery);
+  // Retrieve exactly the 92 Excel sheet components
+  const products = useMemo(() => {
+    return ECE_COMPONENTS_CATALOG as Listing[];
+  }, []);
+
+  // Filtered and sorted products
+  const filteredProducts = useMemo(() => {
+    let result = products;
+
+    if (selectedCategory !== "All") {
+      result = result.filter(
+        (item) => item.category === selectedCategory || item.tags?.includes(selectedCategory) || item.componentDetails?.category === selectedCategory
+      );
+    }
+
+    const query = searchInput.trim().toLowerCase();
+    if (query) {
+      result = result.filter((item) => {
+        const titleMatch = (item.title || "").toLowerCase().includes(query);
+        const specMatch = (item.specification || item.componentDetails?.mpn || "").toLowerCase().includes(query);
+        const catMatch = (item.category || item.componentDetails?.category || "").toLowerCase().includes(query);
+        const notesMatch = (item.notes || "").toLowerCase().includes(query);
+        const sNoMatch = item.sNo ? String(item.sNo) === query.replace("#", "") : false;
+        const unitMatch = (item.unit || "").toLowerCase().includes(query);
+        const summaryMatch = (item.summary || "").toLowerCase().includes(query);
+        return titleMatch || specMatch || catMatch || notesMatch || sNoMatch || unitMatch || summaryMatch;
+      });
+    }
+
+    result = [...result].sort((a, b) => {
+      const priceA = a.price ?? a.projectPrice ?? 0;
+      const priceB = b.price ?? b.projectPrice ?? 0;
+      if (sortBy === "price-asc") {
+        return priceA - priceB;
+      }
+      if (sortBy === "price-desc") {
+        return priceB - priceA;
+      }
+      if (sortBy === "name") {
+        return (a.title || "").localeCompare(b.title || "");
+      }
+      return (a.sNo ?? 0) - (b.sNo ?? 0);
+    });
+
+    return result;
+  }, [products, selectedCategory, searchInput, sortBy]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredProducts.length / pageSize) || 1;
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredProducts.slice(start, start + pageSize);
+  }, [filteredProducts, currentPage, pageSize]);
+
+  // Cart total for components
+  const cartComponents = useMemo(() => {
+    return cartIds
+      .map((id) => products.find((p) => p.id === id))
+      .filter((p): p is Listing => Boolean(p));
+  }, [cartIds, products]);
+
+  const cartTotal = cartComponents.reduce((sum, item) => sum + (item.price ?? item.projectPrice ?? 0), 0);
+
+  function handleCategoryClick(cat: string) {
+    setSelectedCategory(cat);
     setCurrentPage(1);
   }
 
-  const pageCount = Math.ceil(matchingProducts.length / pageSize);
-  const visibleProducts = matchingProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  function handleSearchChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setSearchInput(e.target.value);
+    setCurrentPage(1);
+  }
+
+  function clearSearch() {
+    setSearchInput("");
+    setCurrentPage(1);
+  }
+
+  function getCategoryIcon(cat?: string) {
+    switch (cat) {
+      case "Sensors & IoT":
+        return <Activity size={24} />;
+      case "Semiconductors":
+        return <Sparkles size={24} />;
+      case "ICs & digital":
+      case "Boards & embedded":
+        return <Cpu size={24} />;
+      case "Prototyping":
+        return <Layers3 size={24} />;
+      case "Switching & power":
+        return <CircuitBoard size={24} />;
+      case "Electrical lab":
+        return <Wrench size={24} />;
+      case "Consumables":
+        return <Package size={24} />;
+      default:
+        return <CircuitBoard size={24} />;
+    }
+  }
 
   return (
     <main className="directory-page component-catalog-page">
-      <section className="directory-hero component-catalog-hero">
-        <div className="directory-hero-copy">
-          <div className="eyebrow"><span className="eyebrow-line" /> COMPONENT PRICE COMPARISON</div>
-          <h1>Find the right part, <em>compare sellers.</em></h1>
-          <p>Search admin-verified components and compare seller prices, stock and order links. Purchases happen on each seller’s site; this page does not sell components.</p>
-          <form className="component-search-form" onSubmit={(event) => void search(event)}>
-            <label className="sr-only" htmlFor="component-search">Search by component name or manufacturer part number</label>
-            <input id="component-search" type="search" minLength={2} maxLength={80} value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search a part, e.g. ESP32-WROOM-32 or NE555" />
-            <button className="button button-dark" type="submit">Search components <ArrowRight size={15} /></button>
-          </form>
-        </div>
-        <div className="directory-hero-art"><div className="hero-art-label">SEARCH / COMPARE / BUY</div><div className="directory-art-chip"><Scale size={48} /></div><div className="art-small-label">SELLER PRICES &amp; STOCK</div></div>
-      </section>
       <section className="directory-content component-catalog-content">
-        <div className="component-catalog-note"><ShieldCheck size={17} /><span>Offers are entered by an authorized admin from seller pages. Prices and stock can change; compare only prices in the same currency and confirm details with the retailer before purchase.</span></div>
-        {query && matchingProducts.length === 0 && (
-          <div className="empty-state"><div className="empty-icon"><Cpu size={23} /></div><h3>No listed parts match that search.</h3><p>Try another part name or manufacturer part number.</p></div>
-        )}
-        {matchingProducts.length > 0 && (
-          <>
-            <div className="component-search-summary"><h2>{query ? `Results for “${query}”` : "Verified component offers"}</h2><span>{matchingProducts.length} component{matchingProducts.length === 1 ? "" : "s"}</span></div>
-            <div className="component-part-list">
-              {visibleProducts.map((product) => {
-                const details = product.componentDetails;
-                if (!details) return null;
-                const offers = [...details.offers].sort((left, right) =>
-                  left.currency.localeCompare(right.currency) || left.price - right.price || left.seller.localeCompare(right.seller),
-                );
-                return (
-                  <article className="component-part-card" key={product.id}>
-                    <div className="component-part-heading">
-                      {details.imageUrl ? <img className="component-part-image" src={details.imageUrl} alt={product.title} loading="lazy" /> : <div className="component-part-image component-part-image-placeholder"><Cpu size={30} /></div>}
-                      <div>
-                        {details.category && <span className="component-part-category">{details.category}</span>}
-                        <h3>{product.title}</h3>
-                        <p>{product.organization !== "Not specified" ? `${product.organization} · ` : ""}MPN: <strong>{details.mpn}</strong></p>
-                        <p className="component-part-description">{product.summary}</p>
-                      </div>
-                      <span className="component-part-offer-count">{offers.length} seller offer{offers.length === 1 ? "" : "s"}</span>
-                    </div>
-                    {offers.length > 0 ? (
-                      <div className="component-offer-table">
-                        <div className="component-offer-row component-offer-header"><span>Seller</span><span>Price (same currency)</span><span>Availability / MOQ</span><span>Buy</span></div>
-                        {offers.map((offer, index) => {
-                          const checkedAt = offer.checkedAt ? new Date(`${offer.checkedAt}T00:00:00`) : null;
-                          return (
-                            <div className="component-offer-row" key={`${offer.seller}-${index}`}>
-                              <span className="component-seller-name">{offer.seller}{checkedAt && !Number.isNaN(checkedAt.getTime()) ? <small>Checked {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(checkedAt)}</small> : null}</span>
-                              <span className="component-offer-price">
-                                {offer.price.toLocaleString(undefined, { maximumFractionDigits: 4 })} {offer.currency} / unit
-                                {offer.quantity > 1 && <small>price at quantity {offer.quantity}+</small>}
-                              </span>
-                              <span className="component-offer-stock">
-                                {offer.stock === null ? "Stock not listed" : `${offer.stock.toLocaleString()} in stock`}
-                                {offer.moq !== null && <small>MOQ {offer.moq}</small>}
-                              </span>
-                              <span><a className="button button-outline button-small" href={offer.sellerUrl} target="_blank" rel="noreferrer">Visit seller <ArrowUpRight size={13} /></a></span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : <p className="component-no-offers">Seller offers are not available for this component yet.</p>}
-                  </article>
-                );
-              })}
+        <div className="project-mode-tabs" aria-label="Component options">
+          <button
+            className={activeTab === "catalog" ? "project-mode-tab active" : "project-mode-tab"}
+            onClick={() => setActiveTab("catalog")}
+            type="button"
+          >
+            Browse Catalog
+          </button>
+          <button
+            className={activeTab === "custom" ? "project-mode-tab active" : "project-mode-tab"}
+            onClick={() => setActiveTab("custom")}
+            type="button"
+          >
+            Custom Component Request
+          </button>
+        </div>
+        {activeTab === "custom" ? (
+          <div className="custom-component-portal">
+            <div className="custom-component-hero">
+              <div className="eyebrow"><span className="eyebrow-line" /> CUSTOM COMPONENT SOURCING</div>
+              <h1>Need a custom component, rare IC, or bulk lab quotation?</h1>
+              <p>
+                Can't find a specific component in our standard catalog? Looking for custom value resistors/capacitors, rare or obsolete semiconductors, custom PCB manufacturing, or batch procurement for your college lab? Submit your requirements via Google Form and our ECE lab engineers will prepare a formal quote for you.
+              </p>
+              <div className="custom-hero-cta">
+                <a
+                  className="button button-dark button-large"
+                  href={COMPONENT_CUSTOMIZATION_FORM_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <span>Open Custom Component Request Form</span>
+                  <ArrowUpRight size={17} />
+                </a>
+                <button
+                  className="button button-outline button-large"
+                  type="button"
+                  onClick={() => setActiveTab("catalog")}
+                >
+                  <ArrowLeft size={16} />
+                  <span>Back to Component Catalog</span>
+                </button>
+              </div>
             </div>
-            {pageCount > 1 && (
-              <nav className="component-pagination" aria-label="Component pages">
-                <button className="button button-outline button-small" type="button" onClick={() => setCurrentPage((page) => page - 1)} disabled={currentPage === 1}>
+
+            <div className="custom-component-grid">
+              <div className="custom-feature-card">
+                <div className="custom-feature-icon"><CircuitBoard size={24} /></div>
+                <h3>Custom PCB Fabrication &amp; Assembly</h3>
+                <p>Upload your Gerber files and BOM. We fabricate 1 to 6-layer FR4 boards, assemble SMD and through-hole parts, and perform electrical continuity testing.</p>
+                <span className="custom-badge">Prototyping &amp; SMT</span>
+              </div>
+
+              <div className="custom-feature-card">
+                <div className="custom-feature-icon"><Cpu size={24} /></div>
+                <h3>Rare, Obsolete &amp; High-Grade ICs</h3>
+                <p>Need discontinued microcontrollers, specialized RF modules, analog ASICs, or military-temperature grade chips? We source authentic parts through trusted channels.</p>
+                <span className="custom-badge">Authentic Sourcing</span>
+              </div>
+
+              <div className="custom-feature-card">
+                <div className="custom-feature-icon"><Building2 size={24} /></div>
+                <h3>Institutional University &amp; College Lab Kits</h3>
+                <p>Procuring for student semester practicals? We prepare customized individual student kits (ECE, IoT, Robotics, VLSI) with institutional GST tax invoicing.</p>
+                <span className="custom-badge">College Lab Bundles</span>
+              </div>
+
+              <div className="custom-feature-card">
+                <div className="custom-feature-icon"><Wrench size={24} /></div>
+                <h3>Lab Test Instruments &amp; Calibration</h3>
+                <p>Order high-bandwidth oscilloscopes, arbitrary function generators, regulated bench supplies, and safety isolation transformers with factory calibration certificates.</p>
+                <span className="custom-badge">Certified Instruments</span>
+              </div>
+            </div>
+
+            <div className="custom-process-card">
+              <h3>How Custom Procurement Works</h3>
+              <div className="custom-steps">
+                <div className="custom-step">
+                  <span className="step-num">1</span>
+                  <h4>Submit Request</h4>
+                  <p>Open the Google Form and provide required part numbers, quantities, target specifications, or upload your BOM.</p>
+                </div>
+                <div className="custom-step">
+                  <span className="step-num">2</span>
+                  <h4>Engineering Review</h4>
+                  <p>Our lab engineers check supplier availability, technical compatibility, pricing, and bulk discounts.</p>
+                </div>
+                <div className="custom-step">
+                  <span className="step-num">3</span>
+                  <h4>Formal Quotation</h4>
+                  <p>We send an official quotation / proforma invoice with GST, HSN codes, and lead times within 24 hours.</p>
+                </div>
+                <div className="custom-step">
+                  <span className="step-num">4</span>
+                  <h4>Dispatch &amp; Delivery</h4>
+                  <p>Upon institutional purchase order or payment, goods are tested, securely packed, and shipped via insured express courier.</p>
+                </div>
+              </div>
+              <div className="custom-form-note">
+                <ShieldCheck size={18} />
+                <span>
+                  Official Google Form URL: <strong>{COMPONENT_CUSTOMIZATION_FORM_URL}</strong> (Update this form URL anytime in system settings).
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Search & Toolbar */}
+            <div className="directory-toolbar component-toolbar">
+              <div className="component-search-wrap">
+                <Search size={16} className="component-search-icon" />
+                <input
+                  id="component-search"
+                  type="search"
+                  value={searchInput}
+                  onChange={handleSearchChange}
+                  placeholder="Search 92 components (e.g. ESP32, 10 kΩ, 7400)..."
+                  aria-label="Search 92 components"
+                />
+                {searchInput && (
+                  <button
+                    type="button"
+                    onClick={clearSearch}
+                    className="component-search-clear"
+                    aria-label="Clear search"
+                  >
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+
+              <div className="component-toolbar-filters">
+                <label className="select-wrap project-category-filter">
+                  <select
+                    aria-label="Filter components by category"
+                    value={selectedCategory}
+                    onChange={(e) => handleCategoryClick(e.target.value)}
+                  >
+                    {COMPONENT_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat === "All" ? "All categories" : cat}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} />
+                </label>
+
+                <label className="select-wrap component-sort-filter">
+                  <select
+                    aria-label="Sort components"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as any)}
+                  >
+                    <option value="default">Default (S.No)</option>
+                    <option value="price-asc">Price: Low to High</option>
+                    <option value="price-desc">Price: High to Low</option>
+                    <option value="name">Name: A–Z</option>
+                  </select>
+                  <ChevronDown size={14} />
+                </label>
+
+                <span className="count-label projects-count">
+                  {filteredProducts.length} PARTS
+                </span>
+              </div>
+            </div>
+
+            {/* Empty State */}
+            {filteredProducts.length === 0 && (
+              <div className="empty-state">
+                <div className="empty-icon"><Cpu size={24} /></div>
+                <h3>No components match your search.</h3>
+                <p>Try searching with another keyword or select “All” categories to browse all 92 items.</p>
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={() => { setSelectedCategory("All"); setSearchInput(""); }}
+                >
+                  Reset filters &amp; View All
+                </button>
+              </div>
+            )}
+
+            {/* Products Grid */}
+            {paginatedProducts.length > 0 && (
+              <div className="component-grid-new">
+                {paginatedProducts.map((product, index) => {
+                  const isInCart = cartIds.includes(product.id);
+                  const displayPrice = product.price ?? product.projectPrice ?? 0;
+                  const unitLabel = product.unit || "pc";
+                  const sNo = product.sNo ?? (index + 1);
+
+                  return (
+                    <article
+                      className="component-card-modern"
+                      key={product.id}
+                      onClick={() => onViewListing?.(product)}
+                    >
+                      <div className="component-card-top-bar">
+                        <span className="component-card-sno">#{sNo}</span>
+                        <span className="component-card-stock">
+                          <span className="stock-dot" /> In Stock
+                        </span>
+                      </div>
+
+                      <div
+                        className="component-card-img-wrap"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onViewListing?.(product);
+                        }}
+                      >
+                        {product.imageUrl ? (
+                          <img
+                            src={product.imageUrl}
+                            alt={product.title}
+                            loading="lazy"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLElement).style.display = "none";
+                            }}
+                          />
+                        ) : (
+                          <div className="component-card-fallback-icon">
+                            {getCategoryIcon(product.category)}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="component-card-body">
+                        <span className="component-card-cat-badge">{product.category}</span>
+                        <h3 className="component-card-title" title={product.title}>
+                          {onViewListing ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onViewListing(product);
+                              }}
+                              style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "inherit", cursor: "pointer", textAlign: "left" }}
+                            >
+                              {product.title}
+                            </button>
+                          ) : (
+                            product.title
+                          )}
+                        </h3>
+                        <p className="component-card-spec" title={product.specification || product.summary}>
+                          {product.specification || product.summary}
+                        </p>
+                        {product.quantity ? (
+                          <span className="component-card-pack-info">
+                            Pack: {product.quantity} {unitLabel}
+                          </span>
+                        ) : null}
+                        {product.notes ? (
+                          <p className="component-card-notes" title={product.notes}>
+                            {product.notes}
+                          </p>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="text-link"
+                          style={{ marginTop: 6, fontSize: "12.5px", alignSelf: "flex-start" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onViewListing?.(product);
+                          }}
+                        >
+                          View details <ArrowRight size={13} />
+                        </button>
+                      </div>
+
+                      <div className="component-card-footer" onClick={(e) => e.stopPropagation()}>
+                        <div className="component-card-price-row">
+                          <div>
+                            <span className="component-card-price-val">₹{displayPrice.toLocaleString("en-IN")}</span>
+                            <span className="component-card-unit-label">/{unitLabel}</span>
+                          </div>
+                          <span className="component-card-verified-tag">Lab Verified</span>
+                        </div>
+
+                        <div className="component-card-btn-row">
+                          <button
+                            type="button"
+                            className={`button button-outline ${isInCart ? "in-cart-active" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onAddToCart(product.id);
+                            }}
+                            title={isInCart ? "In your cart" : "Add to cart"}
+                          >
+                            {isInCart ? <Check size={14} /> : <ShoppingCart size={14} />}
+                            <span>{isInCart ? "In Cart" : "Add"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            className="button button-order-now"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onBuyNow(product.id);
+                            }}
+                            title="Order Now"
+                          >
+                            <ShoppingCart size={14} />
+                            <span>Order Now</span>
+                            <ArrowRight size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <nav className="component-pagination" aria-label="Component catalog pages">
+                <button
+                  className="button button-outline button-small"
+                  type="button"
+                  onClick={() => {
+                    setCurrentPage((page) => Math.max(1, page - 1));
+                    window.scrollTo({ top: 350, behavior: "smooth" });
+                  }}
+                  disabled={currentPage === 1}
+                >
                   <ChevronLeft size={14} /> Previous
                 </button>
-                <span>Page {currentPage} of {pageCount}</span>
-                <button className="button button-outline button-small" type="button" onClick={() => setCurrentPage((page) => page + 1)} disabled={currentPage === pageCount}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#475569" }}>
+                  Page {currentPage} of {totalPages} ({filteredProducts.length} components)
+                </span>
+                <button
+                  className="button button-outline button-small"
+                  type="button"
+                  onClick={() => {
+                    setCurrentPage((page) => Math.min(totalPages, page + 1));
+                    window.scrollTo({ top: 350, behavior: "smooth" });
+                  }}
+                  disabled={currentPage === totalPages}
+                >
                   Next <ChevronRight size={14} />
                 </button>
               </nav>
             )}
           </>
         )}
-        {!query && matchingProducts.length === 0 && <div className="empty-state component-search-empty"><div className="empty-icon"><Cpu size={23} /></div><h3>Verified component comparisons are coming soon.</h3><p>Our team is preparing the first components with sourced seller prices and product images. No estimated prices are displayed.</p></div>}
       </section>
+
+      {/* Sticky Floating Cart Bar */}
+      {cartIds.length > 0 && (
+        <aside className="component-floating-cart-bar" aria-label="Shopping Cart Summary">
+          <div className="floating-cart-inner">
+            <div className="floating-cart-info">
+              <div className="floating-cart-badge">
+                <ShoppingCart size={18} />
+                <span>{cartIds.length}</span>
+              </div>
+              <div className="floating-cart-text">
+                <strong>{cartIds.length} {cartIds.length === 1 ? "item" : "items"} in cart</strong>
+                <span>{cartTotal > 0 ? `Subtotal: ₹${cartTotal.toLocaleString("en-IN")}` : "Ready for checkout"}</span>
+              </div>
+            </div>
+            <div className="floating-cart-actions">
+              <button className="button button-outline button-small" type="button" onClick={onGoToCart}>
+                <span>View Cart</span>
+              </button>
+              <button className="button button-order-now button-small" type="button" onClick={onGoToCheckout}>
+                <span>Order Now</span>
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          </div>
+        </aside>
+      )}
     </main>
   );
 }
@@ -3393,43 +3598,62 @@ function ProjectCartPage({
   onContinueShopping: () => void;
   onViewListing: (listing: Listing) => void;
 }) {
-  const projects = cartIds.map((id) => listings.find((item) => item.id === id && item.kind === "Projects")).filter((item): item is Listing => Boolean(item));
-  const total = projects.reduce((sum, item) => sum + projectPrice(item), 0);
+  const mergedListings = useMemo(() => {
+    const map = new Map<string, Listing>();
+    for (const item of listings) {
+      map.set(item.id, item);
+    }
+    for (const comp of ECE_COMPONENTS_CATALOG) {
+      if (!map.has(comp.id)) {
+        map.set(comp.id, comp as Listing);
+      }
+    }
+    return [...map.values()];
+  }, [listings]);
+
+  const cartItems = cartIds
+    .map((id) => mergedListings.find((item) => item.id === id && (item.kind === "Projects" || item.kind === "Products")))
+    .filter((item): item is Listing => Boolean(item));
+  const total = cartItems.reduce((sum, item) => sum + (item.price ?? projectPrice(item) ?? 0), 0);
 
   return (
     <main className="directory-page checkout-page">
-      <section className="directory-hero checkout-hero">
-        <div className="directory-hero-copy">
-          <div className="eyebrow"><span className="eyebrow-line" /> YOUR PROJECT ORDER</div>
-          <h1>Review your <em>cart.</em></h1>
-          <p>Check the project details and total before continuing to secure payment.</p>
-        </div>
-        <div className="directory-hero-art"><div className="hero-art-label">REVIEW / CONFIRM / BUILD</div><div className="directory-art-chip"><ShoppingCart size={48} /></div><div className="art-small-label">{projects.length} PROJECT{projects.length === 1 ? "" : "S"} IN CART</div></div>
-      </section>
-      <section className="directory-content checkout-content">
-        {projects.length === 0 ? (
+      <section className="directory-content checkout-content" style={{ paddingTop: 32 }}>
+        {cartItems.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon"><ShoppingCart size={23} /></div>
             <span className="eyebrow"><span className="eyebrow-line" /> YOUR CART IS EMPTY</span>
-            <h3>Choose a project to get started.</h3>
-            <p>Ready-made project orders will stay in your cart while you browse.</p>
-            <button className="button button-primary" type="button" onClick={onContinueShopping}>Browse projects <ArrowRight size={15} /></button>
+            <h3>Choose a component or project kit to get started.</h3>
+            <p>Your items will stay in your cart while you browse.</p>
+            <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+              <button className="button button-primary" type="button" onClick={onContinueShopping}>
+                Browse projects <ArrowRight size={15} />
+              </button>
+            </div>
           </div>
         ) : (
           <div className="cart-layout">
             <div className="cart-items">
-              {projects.map((item) => (
+              {cartItems.map((item) => (
                 <article className="cart-item" key={item.id}>
-                  {item.imageUrl ? <img src={item.imageUrl} alt="" loading="lazy" /> : <div className="cart-item-placeholder"><CircuitBoard size={25} /></div>}
+                  {item.imageUrl ? (
+                    <img src={item.imageUrl} alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }} />
+                  ) : (
+                    <div className="cart-item-placeholder"><CircuitBoard size={25} /></div>
+                  )}
                   <div className="cart-item-info">
-                    <span className="project-card-category">{item.projectCategory}</span>
+                    <span className="project-card-category">{item.projectCategory || item.category || (item.kind === "Products" ? "ECE Component" : "Hardware Project")}</span>
                     <button className="cart-item-title" type="button" onClick={() => onViewListing(item)}>{item.title}</button>
                     <p>{item.summary}</p>
+                    {item.specification ? <p className="cart-item-spec"><strong>Spec:</strong> {item.specification}</p> : null}
+                    {item.unit ? <p className="cart-item-spec"><strong>Unit:</strong> {item.quantity ? `${item.quantity} ` : ""}{item.unit}</p> : null}
                     {item.components?.length ? <p className="cart-item-spec"><strong>Components:</strong> {item.components.join(", ")}</p> : null}
-                    <button className="text-link" type="button" onClick={() => onViewListing(item)}>View details <ArrowRight size={14} /></button>
-                    <button className="text-link cart-remove" type="button" onClick={() => removeProject(item.id)}>Remove</button>
+                    <div style={{ display: "flex", gap: "14px", marginTop: "6px" }}>
+                      <button className="text-link" type="button" onClick={() => onViewListing(item)}>View details <ArrowRight size={14} /></button>
+                      <button className="text-link cart-remove" type="button" onClick={() => removeProject(item.id)}>Remove</button>
+                    </div>
                   </div>
-                  <strong className="cart-item-price">{formatPrice(projectPrice(item))}</strong>
+                  <strong className="cart-item-price">{formatPrice(item.price ?? projectPrice(item) ?? 0)}</strong>
                 </article>
               ))}
               <button className="button button-outline" type="button" onClick={onContinueShopping}>Continue shopping</button>
@@ -3437,11 +3661,11 @@ function ProjectCartPage({
             <aside className="cart-summary">
               <span className="eyebrow"><span className="eyebrow-line" /> ORDER SUMMARY</span>
               <h2>Your total.</h2>
-              <div className="cart-summary-row"><span>Projects ({projects.length})</span><strong>{formatPrice(total)}</strong></div>
-              <div className="cart-summary-row"><span>Delivery & taxes</span><span>Calculated after checkout</span></div>
+              <div className="cart-summary-row"><span>Items ({cartItems.length})</span><strong>{formatPrice(total)}</strong></div>
+              <div className="cart-summary-row"><span>Delivery &amp; taxes</span><span>Free Pan-India Delivery</span></div>
               <div className="cart-summary-total"><span>Subtotal</span><strong>{formatPrice(total)}</strong></div>
-              <p>Final payable amount and delivery details will be confirmed before payment.</p>
-              <button className="button button-dark cart-checkout-button" type="button" onClick={onCheckout}>Continue to checkout <ArrowRight size={16} /></button>
+              <p>Final payable amount and verified checkout will proceed through secure payment gateway.</p>
+              <button className="button button-order-now cart-checkout-button" type="button" onClick={onCheckout}>Order now <ArrowRight size={16} /></button>
             </aside>
           </div>
         )}
@@ -3682,10 +3906,21 @@ function ProjectCheckoutPage({
       });
   }, [currentUser, addressMode]);
 
-  // Cart project items
-  const activeCartItems = cartIds
-    .map((id) => listings.find((item) => item.id === id && item.kind === "Projects"))
-    .filter((item): item is Listing => Boolean(item));
+  // Cart items (projects and components)
+  const activeCartItems = useMemo(() => {
+    const map = new Map<string, Listing>();
+    for (const item of listings) {
+      map.set(item.id, item);
+    }
+    for (const comp of ECE_COMPONENTS_CATALOG) {
+      if (!map.has(comp.id)) {
+        map.set(comp.id, comp as Listing);
+      }
+    }
+    return cartIds
+      .map((id) => map.get(id))
+      .filter((item): item is Listing => Boolean(item && (item.kind === "Projects" || item.kind === "Products")));
+  }, [cartIds, listings]);
 
   const [purchasedItems, setPurchasedItems] = useState<Listing[]>(() => {
     if (initialConfirmedOrder?.items && listings.length) {
@@ -3771,7 +4006,7 @@ function ProjectCheckoutPage({
   }
 
   const displayItems = activeCartItems;
-  const subtotal = displayItems.reduce((acc, item) => acc + (projectPrice(item) || 3499), 0);
+  const subtotal = displayItems.reduce((acc, item) => acc + (item.price ?? projectPrice(item) ?? 3499), 0);
   const shippingCharges = 0; // Free shipping
   const total = subtotal + shippingCharges;
 
@@ -3968,7 +4203,7 @@ function ProjectCheckoutPage({
   // Handle Custom Web Checkout with Cashfree Elements (In-Page, NO redirect)
   async function handlePayNow() {
     if (activeCartItems.length === 0) {
-      setPaymentError("Your cart is empty. Please select a project first.");
+      setPaymentError("Your cart is empty. Please select an item first.");
       return;
     }
     setSubmitting(true);
@@ -4000,6 +4235,12 @@ function ProjectCheckoutPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectIds: activeCartItems.map((item) => item.id),
+          items: activeCartItems.map((item) => ({
+            id: item.id,
+            title: item.title,
+            price: item.price ?? projectPrice(item),
+            qty: 1,
+          })),
           customer: {
             name: fullName.trim(),
             email: emailAddress.trim(),
@@ -5813,7 +6054,7 @@ function ListingCard({
         <div className="tag-row">{listing.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div>
         <div className="listing-actions">
           <button type="button" className="button button-outline button-small" onClick={onViewDetails}>View details <ArrowRight size={14} /></button>
-          {isProjects && onOrderNow && <button className="button button-dark button-small" type="button" onClick={onOrderNow}>Order now <ArrowRight size={14} /></button>}
+          {isProjects && onOrderNow && <button className="button button-order-now button-small" type="button" onClick={onOrderNow}>Order now <ArrowRight size={14} /></button>}
           {isOpportunity && listing.sourceUrl && (
             <a
               href={listing.sourceUrl}
@@ -11809,35 +12050,8 @@ function componentOfferToDraft(offer?: ComponentOffer): ComponentOfferDraft {
   };
 }
 
-async function loadAdminComponentListings(client: SupabaseClient): Promise<Listing[]> {
-  const customList = getLocalCustomComponents();
-  let dbRows: Listing[] = [];
-  try {
-    const { data, error } = await client
-      .from("listings")
-      .select("id, kind, title, organization, city, summary, source_url, details")
-      .eq("kind", "Products")
-      .order("title");
-    if (!error && data) {
-      dbRows = data
-        .filter((row) => !LEGACY_SAMPLE_PRODUCT_TITLES.has(row.title.trim().toLowerCase()))
-        .map((row) => ({
-          id: row.id,
-          kind: "Products" as const,
-          title: row.title,
-          organization: row.organization,
-          city: row.city,
-          summary: row.summary,
-          tags: [],
-          sourceUrl: row.source_url ?? undefined,
-          componentDetails: parseComponentDetails(row.details),
-        }))
-        .filter((row) => Boolean(row.componentDetails));
-    }
-  } catch (err) {
-    console.warn("Could not load remote admin component listings:", err);
-  }
-  const combined = [...dbRows, ...customList, ...(INITIAL_20_COMPONENTS as Listing[])];
+async function loadAdminComponentListings(_client: SupabaseClient): Promise<Listing[]> {
+  const combined = [...(ECE_COMPONENTS_CATALOG as Listing[])];
   return uniqueComponentListings(combined);
 }
 
