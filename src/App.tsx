@@ -2223,6 +2223,7 @@ function App() {
             onUpdateOpportunityActivity={(activity, status) => void saveOpportunityActivity({ id: activity.opportunity_id, kind: activity.opportunity_kind, title: activity.title, organization: activity.organization, city: activity.city, sourceUrl: activity.opportunity_url, summary: "", tags: [] }, status)}
             initialTrackingOrder={activeTrackingOrder}
             onClearInitialTrackingOrder={() => setActiveTrackingOrder(null)}
+            onOpenAuth={() => setAuthOpen(true)}
           />
         )
       ) : page === "Cart" ? (
@@ -7615,6 +7616,7 @@ function StudentDashboard({
   onUpdateOpportunityActivity,
   initialTrackingOrder,
   onClearInitialTrackingOrder,
+  onOpenAuth,
 }: {
   student: User | null;
   section: StudentDashboardSection;
@@ -7627,6 +7629,7 @@ function StudentDashboard({
   onUpdateOpportunityActivity: (activity: OpportunityActivity, status: OpportunityActivityStatus) => void;
   initialTrackingOrder?: AdminOrder | null;
   onClearInitialTrackingOrder?: () => void;
+  onOpenAuth?: () => void;
 }) {
   const [message, setMessage] = useState("");
   const [opportunityActivities, setOpportunityActivities] = useState<OpportunityActivity[]>([]);
@@ -8073,7 +8076,22 @@ function StudentDashboard({
     return (
       <main className="directory-page">
         <section className="directory-content">
-          <div className="empty-state"><div className="empty-icon"><UserRound size={23} /></div><span className="eyebrow"><span className="eyebrow-line" /> STUDENT DASHBOARD</span><h3>Sign in to view your dashboard.</h3><p>Student accounts are optional. You can keep exploring without signing in.</p><button className="button button-dark" onClick={() => navigate("Home")}>Continue browsing <ArrowRight size={15} /></button></div>
+          <div className="empty-state">
+            <div className="empty-icon"><UserRound size={23} /></div>
+            <span className="eyebrow"><span className="eyebrow-line" /> STUDENT DASHBOARD</span>
+            <h3>Sign in to view your dashboard.</h3>
+            <p>Sign in with your Google or student account to view your dashboard, profile, and track opportunities.</p>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap", marginTop: "16px" }}>
+              {onOpenAuth && (
+                <button className="button button-primary" onClick={onOpenAuth}>
+                  Sign In with Google <ArrowRight size={15} />
+                </button>
+              )}
+              <button className="button button-dark" onClick={() => navigate("Home")}>
+                Continue browsing
+              </button>
+            </div>
+          </div>
         </section>
       </main>
     );
