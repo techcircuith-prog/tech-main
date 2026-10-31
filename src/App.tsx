@@ -1261,17 +1261,63 @@ function App() {
       return null;
     }
     setCurrentUser(user);
+
+    // Extract preferred display name from Google OAuth metadata or email
+    const metaName =
+      (user.user_metadata?.full_name as string | undefined)?.trim() ||
+      (user.user_metadata?.name as string | undefined)?.trim() ||
+      (user.user_metadata?.user_name as string | undefined)?.trim() ||
+      (user.user_metadata?.given_name as string | undefined)?.trim() ||
+      (user.email ? user.email.split("@")[0] : "Student");
+
+    // Ensure local student profile cache is initialized so details are never lost
+    const cacheKey = `techcircuit_student_profile_${user.id}`;
+    try {
+      const existingRaw = localStorage.getItem(cacheKey);
+      if (!existingRaw) {
+        localStorage.setItem(cacheKey, JSON.stringify({
+          display_name: metaName,
+          role: "student",
+          created_at: new Date().toISOString(),
+        }));
+      } else {
+        const parsed = JSON.parse(existingRaw);
+        if (!parsed.display_name && metaName) {
+          parsed.display_name = metaName;
+          localStorage.setItem(cacheKey, JSON.stringify(parsed));
+        }
+      }
+    } catch {}
+
     try {
       const { data, error } = await client
         .from("profiles")
-        .select("role")
+        .select("role, display_name")
         .eq("id", user.id)
         .maybeSingle();
 
       if (error || !data) {
+        // Attempt to auto-provision student profile row in Supabase
+        try {
+          await client.from("profiles").insert({
+            id: user.id,
+            display_name: metaName,
+            role: "student",
+          });
+        } catch {
+          // If insert is restricted by RLS, local storage cache ensures smooth functioning
+        }
         setUserRole("student");
         return "student";
       }
+
+      // If profile exists but display_name is empty (common in first-time OAuth), fill it in
+      if (!data.display_name && metaName) {
+        try {
+          await client.from("profiles").update({ display_name: metaName }).eq("id", user.id);
+        } catch {}
+      }
+
       const role = data.role === "admin" ? "admin" : "student";
       setUserRole(role);
       return role;
@@ -1461,29 +1507,77 @@ function App() {
     const supabase = getSupabase();
     if (!supabase) return;
     const client = supabase;
+    const searchParams = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-    const isRecoveryCallback = new URLSearchParams(window.location.search).get("type") === "recovery" || hashParams.get("type") === "recovery";
-    const isOAuthCallback = !isRecoveryCallback && (new URLSearchParams(window.location.search).has("code") || hashParams.has("access_token"));
+    const isRecoveryCallback = searchParams.get("type") === "recovery" || hashParams.get("type") === "recovery";
+    const hasCode = searchParams.has("code") || hashParams.has("access_token");
+    let isOAuthCallback = !isRecoveryCallback && (hasCode || sessionStorage.getItem("techcircuit_oauth_in_progress") === "true");
+
+    // Catch any OAuth redirect errors from Google / Supabase
+    const oauthError = searchParams.get("error_description") || searchParams.get("error") || hashParams.get("error_description") || hashParams.get("error");
+    if (oauthError) {
+      sessionStorage.removeItem("techcircuit_oauth_in_progress");
+      const cleanUrl = ["/login", "/signin", "/student-login", "/auth"].includes(window.location.pathname.replace(/\/+$/, ""))
+        ? "/"
+        : window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+      showToast(`Google sign-in was not completed: ${oauthError}`, "error");
+    }
+
+    function processSession(user: User, isOAuth: boolean) {
+      void resolveUserRole(client, user).then((role) => {
+        if (isRecoveryCallback) {
+          setAuthRecovery(true);
+          setAuthOpen(true);
+        } else if (isOAuth) {
+          sessionStorage.removeItem("techcircuit_oauth_in_progress");
+          setAuthOpen(false);
+
+          // Clean query/hash parameters from URL
+          const currentPath = window.location.pathname.replace(/\/+$/, "");
+          const cleanPath = ["/login", "/signin", "/student-login", "/auth"].includes(currentPath)
+            ? "/"
+            : (window.location.pathname || "/");
+          window.history.replaceState({}, document.title, cleanPath);
+
+          const displayName =
+            (user.user_metadata?.full_name as string | undefined)?.trim() ||
+            (user.user_metadata?.name as string | undefined)?.trim() ||
+            (user.user_metadata?.user_name as string | undefined)?.trim() ||
+            (user.user_metadata?.given_name as string | undefined)?.trim() ||
+            (user.email ? user.email.split("@")[0] : "Student");
+          showToast(`Welcome back, ${displayName}! Signed in with Google.`, "success");
+
+          if (role === "student" && page !== "Checkout" && page !== "Cart" && page !== "PaymentResult") {
+            setPage("Dashboard");
+            setStudentSection("overview");
+          }
+        }
+      });
+    }
+
     void client.auth.getSession().then(({ data, error }) => {
       if (error) {
         setDataError("Could not restore your session.");
         return;
       }
       if (data.session?.user) {
-        void resolveUserRole(client, data.session.user).then((role) => {
-          if (isRecoveryCallback) {
-            setAuthRecovery(true);
-            setAuthOpen(true);
-          }
-          if (isOAuthCallback && role === "student") setPage("Dashboard");
-        });
-      } else {
+        processSession(data.session.user, isOAuthCallback);
+      } else if (!hasCode) {
+        // Do not clear state if PKCE code exchange is currently taking place
         setCurrentUser(null);
         setUserRole(null);
       }
     }).catch(() => setDataError("Could not restore your session."));
+
     const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
-      void resolveUserRole(client, session?.user ?? null);
+      if (session?.user) {
+        const isOAuth = isOAuthCallback || (event === "SIGNED_IN" && (hasCode || sessionStorage.getItem("techcircuit_oauth_in_progress") === "true"));
+        processSession(session.user, isOAuth);
+        if (isOAuth) isOAuthCallback = false;
+      } else {
+        void resolveUserRole(client, null);
+      }
       if (event === "PASSWORD_RECOVERY") {
         setAuthRecovery(true);
         setAuthOpen(true);
@@ -3896,7 +3990,13 @@ function ProjectCheckoutPage({
   const [mobileSummaryOpen, setMobileSummaryOpen] = useState(false);
 
   // Address fields (no hardcoded test data)
-  const [fullName, setFullName] = useState(currentUser?.user_metadata?.name || "");
+  const initialUserName =
+    (currentUser?.user_metadata?.full_name as string | undefined)?.trim() ||
+    (currentUser?.user_metadata?.name as string | undefined)?.trim() ||
+    (currentUser?.user_metadata?.user_name as string | undefined)?.trim() ||
+    (currentUser?.user_metadata?.given_name as string | undefined)?.trim() ||
+    (currentUser?.email ? currentUser.email.split("@")[0] : "");
+  const [fullName, setFullName] = useState(initialUserName);
   const [phoneNumber, setPhoneNumber] = useState("");
   const emailAddress = currentUser?.email || "";
   const [addressLine1, setAddressLine1] = useState("");
@@ -3934,7 +4034,7 @@ function ProjectCheckoutPage({
 
   // Saved user profile cache
   const savedAddressRef = useRef({
-    fullName: currentUser?.user_metadata?.name || "",
+    fullName: initialUserName,
     phone: "",
     addressLine1: "",
     addressLine2: "",
@@ -3955,34 +4055,46 @@ function ProjectCheckoutPage({
       .eq("id", currentUser.id)
       .maybeSingle()
       .then(({ data }) => {
-        if (data) {
-          const profileName = (data.display_name || data.name as string | undefined)?.trim() || currentUser.user_metadata?.name || "";
-          const profilePhone = (data.phone as string | undefined)?.trim() || "";
-          const line1 = (data.address_line1 as string | undefined)?.trim() || "";
-          const line2 = (data.address_line2 as string | undefined)?.trim() || "";
-          const c = (data.city as string | undefined)?.trim() || "";
-          const s = (data.state as string | undefined)?.trim() || "Tamil Nadu";
-          const pin = (data.pincode as string | undefined)?.trim() || "";
+        const fallbackName =
+          (currentUser.user_metadata?.full_name as string | undefined)?.trim() ||
+          (currentUser.user_metadata?.name as string | undefined)?.trim() ||
+          (currentUser.user_metadata?.user_name as string | undefined)?.trim() ||
+          (currentUser.user_metadata?.given_name as string | undefined)?.trim() ||
+          (currentUser.email ? currentUser.email.split("@")[0] : "");
 
-          savedAddressRef.current = {
-            fullName: profileName,
-            phone: profilePhone,
-            addressLine1: line1,
-            addressLine2: line2,
-            city: c,
-            state: s,
-            pincode: pin,
-          };
+        let profileName = (data?.display_name || data?.name as string | undefined)?.trim() || fallbackName;
+        let profilePhone = (data?.phone as string | undefined)?.trim() || "";
+        let line1 = (data?.address_line1 as string | undefined)?.trim() || "";
+        let line2 = (data?.address_line2 as string | undefined)?.trim() || "";
+        let c = (data?.city as string | undefined)?.trim() || "";
+        let s = (data?.state as string | undefined)?.trim() || "Tamil Nadu";
+        let pin = (data?.pincode as string | undefined)?.trim() || "";
 
-          if (addressMode === "saved") {
-            if (profileName) setFullName(profileName);
-            if (profilePhone) setPhoneNumber(profilePhone);
-            if (line1) setAddressLine1(line1);
-            if (line2) setAddressLine2(line2);
-            if (c) setCity(c);
-            if (s) setState(s);
-            if (pin) setPincode(pin);
-          }
+        try {
+          const cached = JSON.parse(localStorage.getItem(`techcircuit_student_profile_${currentUser.id}`) || "{}");
+          if (!profileName && cached.display_name) profileName = cached.display_name;
+          if (!profilePhone && cached.phone) profilePhone = cached.phone;
+          if (!c && cached.city) c = cached.city;
+        } catch {}
+
+        savedAddressRef.current = {
+          fullName: profileName,
+          phone: profilePhone,
+          addressLine1: line1,
+          addressLine2: line2,
+          city: c,
+          state: s,
+          pincode: pin,
+        };
+
+        if (addressMode === "saved") {
+          if (profileName) setFullName(profileName);
+          if (profilePhone) setPhoneNumber(profilePhone);
+          if (line1) setAddressLine1(line1);
+          if (line2) setAddressLine2(line2);
+          if (c) setCity(c);
+          if (s) setState(s);
+          if (pin) setPincode(pin);
         }
       });
   }, [currentUser, addressMode]);
@@ -7125,14 +7237,28 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
     setMessage("");
     setBusy(true);
     try {
+      try {
+        sessionStorage.setItem("techcircuit_oauth_in_progress", "true");
+      } catch {}
+
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: window.location.origin },
+        options: {
+          redirectTo: window.location.origin,
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+          },
+        },
       });
-      if (oauthError) setError(`Could not continue with Google: ${oauthError.message}`);
-    } catch {
-      setError("Could not connect to Google sign-in. Please try again.");
-    } finally {
+      if (oauthError) {
+        sessionStorage.removeItem("techcircuit_oauth_in_progress");
+        setError(`Could not continue with Google: ${oauthError.message}`);
+        setBusy(false);
+      }
+    } catch (e: any) {
+      sessionStorage.removeItem("techcircuit_oauth_in_progress");
+      setError(e?.message || "Could not connect to Google sign-in. Please try again.");
       setBusy(false);
     }
   }
@@ -7174,7 +7300,13 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
           <>
             <div className="auth-divider" aria-hidden="true"><span>OR</span></div>
             <button className="button button-outline google-auth-button" type="button" onClick={signInWithGoogle} disabled={busy}>
-              {busy ? "Please wait…" : "Continue with Google"}
+              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>
+                <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
+                <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+              </svg>
+              <span>{busy ? "Connecting to Google…" : "Continue with Google"}</span>
             </button>
           </>
         )}
@@ -7753,7 +7885,14 @@ function StudentDashboard({
           setProfileLoadError(`Could not load your profile: ${error.message}`);
           return;
         }
-        let name = data?.display_name || currentStudent.user_metadata?.name || "";
+        const metaName =
+          (currentStudent.user_metadata?.full_name as string | undefined)?.trim() ||
+          (currentStudent.user_metadata?.name as string | undefined)?.trim() ||
+          (currentStudent.user_metadata?.user_name as string | undefined)?.trim() ||
+          (currentStudent.user_metadata?.given_name as string | undefined)?.trim() ||
+          (currentStudent.email ? currentStudent.email.split("@")[0] : "");
+
+        let name = data?.display_name || metaName || "";
         let inst = data?.institution ?? "";
         let crs = sanitizeCourse(data?.course);
         let yr = data?.academic_year ?? "";
@@ -7775,6 +7914,8 @@ function StudentDashboard({
             }
           }
         } catch {}
+
+        if (!name && metaName) name = metaName;
 
         setProfileName(name);
         setInstitution(inst);
@@ -7847,20 +7988,20 @@ function StudentDashboard({
           .maybeSingle();
 
         if (!error && !data) {
-          await supabase
-            .from("profiles")
-            .upsert({
-              id: currentStudent.id,
-              display_name: profileName.trim(),
-              institution: institution.trim(),
-              course: sanitizedCourse.trim(),
-              academic_year: academicYear,
-              city: location.trim(),
-              interests,
-              role: "student",
-            })
-            .select("id")
-            .maybeSingle();
+          try {
+            await supabase
+              .from("profiles")
+              .insert({
+                id: currentStudent.id,
+                display_name: profileName.trim(),
+                institution: institution.trim(),
+                course: sanitizedCourse.trim(),
+                academic_year: academicYear,
+                city: location.trim(),
+                interests,
+                role: "student",
+              });
+          } catch {}
         }
       } catch (err) {
         console.warn("Saved to local storage, server sync deferred:", err);
