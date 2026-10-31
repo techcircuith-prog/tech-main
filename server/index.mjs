@@ -468,7 +468,7 @@ const server = createServer(async (request, response) => {
           cashfree_order_id: cashfreeOrderId,
           payment_session_id: cfOrder.payment_session_id,
           payment_status: "PENDING",
-          tracking_status: "Order Placed",
+          tracking_status: "Payment Pending",
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           expected_delivery_date: null,
@@ -682,10 +682,16 @@ const server = createServer(async (request, response) => {
       const stageFilter = url.searchParams.get("stage");
       const search = url.searchParams.get("search")?.toLowerCase().trim();
 
-      // Deduplicate orders from store (exclude deleted test orders)
+      // Deduplicate orders from store (ONLY include confirmed PAID orders)
       const uniqueOrders = Array.from(new Set(Array.from(ordersStore.values()).map((o) => o.id)))
         .map((id) => ordersStore.get(id))
-        .filter((o) => Boolean(o) && o.admin_notes !== "deleted" && o.tracking_status !== "Deleted");
+        .filter((o) =>
+          Boolean(o) &&
+          (o.payment_status === "PAID" || o.payment_status === "paid") &&
+          o.tracking_status !== "Payment Pending" &&
+          o.admin_notes !== "deleted" &&
+          o.tracking_status !== "Deleted"
+        );
 
       let filtered = uniqueOrders;
 
@@ -729,8 +735,8 @@ const server = createServer(async (request, response) => {
         orders: filtered,
         summary: {
           total: uniqueOrders.length,
-          paid: uniqueOrders.filter((o) => o.payment_status === "PAID").length,
-          newOrders: uniqueOrders.filter((o) => o.payment_status === "PAID" && o.tracking_status === "Order Placed").length,
+          paid: uniqueOrders.length,
+          newOrders: uniqueOrders.filter((o) => o.tracking_status === "Order Placed" || o.tracking_status === "Confirmed").length,
           inBuild: uniqueOrders.filter((o) => ["Confirmed", "Building (Processing)", "Testing / Quality Check", "Packed"].includes(o.tracking_status)).length,
           shipped: uniqueOrders.filter((o) => o.tracking_status === "Shipped").length,
           delivered: uniqueOrders.filter((o) => o.tracking_status === "Delivered").length,
@@ -816,6 +822,11 @@ const server = createServer(async (request, response) => {
           sendJson(response, 400, { error: "Order ID is required." }, request);
           return;
         }
+        // Only allow registering orders that have completed payment
+        if (orderData.payment_status !== "PAID" && orderData.payment_status !== "paid") {
+          sendJson(response, 400, { error: "Cannot register an order before payment is completed." }, request);
+          return;
+        }
         const orderId = orderData.id || orderData.order_id;
         const existing = ordersStore.get(orderId) || {};
         const merged = {
@@ -824,7 +835,7 @@ const server = createServer(async (request, response) => {
           id: orderId,
           order_id: orderId,
           order_number: orderData.order_number || existing.order_number || `TCH-ORD-${orderId.slice(-6).toUpperCase()}`,
-          payment_status: orderData.payment_status || existing.payment_status || "PAID",
+          payment_status: "PAID",
           tracking_status: orderData.tracking_status || existing.tracking_status || "Order Placed",
           updated_at: new Date().toISOString(),
         };
@@ -847,8 +858,8 @@ const server = createServer(async (request, response) => {
     if (orderDetailMatch) {
       const targetId = orderDetailMatch[1];
       const order = ordersStore.get(targetId);
-      if (!order) {
-        sendJson(response, 404, { error: "Order not found." }, request);
+      if (!order || (order.payment_status !== "PAID" && order.payment_status !== "paid") || order.admin_notes === "deleted" || order.tracking_status === "Deleted") {
+        sendJson(response, 404, { error: "Order not found or payment pending." }, request);
         return;
       }
       const history = historyStore.get(order.id) || [];

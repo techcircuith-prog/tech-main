@@ -295,6 +295,7 @@ const studentMenuItems = [
 ] satisfies { id: StudentMenuDestination; label: string; icon: typeof FileText }[];
 
 type OrderTrackingStage =
+  | "Payment Pending"
   | "Order Placed"
   | "Confirmed"
   | "Building (Processing)"
@@ -303,7 +304,8 @@ type OrderTrackingStage =
   | "Shipped"
   | "Delivered"
   | "Cancelled"
-  | "Refunded";
+  | "Refunded"
+  | "Deleted";
 
 interface OrderStatusHistory {
   id: string;
@@ -655,6 +657,42 @@ function getLocalCustomComponents(): Listing[] {
   } catch {
     return [];
   }
+}
+
+function getDeletedProjectIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem("techcircuit:deleted_projects");
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function getLocalCustomProjects(): Listing[] {
+  try {
+    const raw = localStorage.getItem("techcircuit:custom_projects");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const deleted = getDeletedProjectIds();
+    return Array.isArray(parsed) ? parsed.filter((p: Listing) => !deleted.has(p.id)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadAdminProjectListings(): Listing[] {
+  const custom = getLocalCustomProjects();
+  const deleted = getDeletedProjectIds();
+  const allProjects = [...custom, specialOfferProject, ...projectListings].filter((p) => !deleted.has(p.id));
+  const seen = new Set<string>();
+  const unique: Listing[] = [];
+  for (const p of allProjects) {
+    if (!seen.has(p.id)) {
+      seen.add(p.id);
+      unique.push(p);
+    }
+  }
+  return unique;
 }
 
 const navigationItems: { label: string; page: Page }[] = [
@@ -1272,6 +1310,25 @@ function App() {
     }
   }, []);
 
+  // Clean up any stale unconfirmed/unpaid orders from localStorage on load
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("techcircuit_orders_store");
+      if (raw) {
+        const parsed: AdminOrder[] = JSON.parse(raw);
+        const onlyPaid = parsed.filter(
+          (o) =>
+            o.payment_status?.toUpperCase() === "PAID" &&
+            o.tracking_status !== "Deleted" &&
+            o.tracking_status !== "Payment Pending"
+        );
+        if (onlyPaid.length !== parsed.length) {
+          localStorage.setItem("techcircuit_orders_store", JSON.stringify(onlyPaid));
+        }
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => {
     if (!returnOrderId) return;
     const cleanUrl = window.location.pathname;
@@ -1374,6 +1431,8 @@ function App() {
           setActiveTrackingOrder(fullOrd);
           setPage("Checkout");
           showToast("Payment Successful! Your order has been placed.", "success");
+        } else {
+          showToast("Payment was not completed. No order was placed.", "info");
         }
       } catch (err) {
         console.error("Failed to verify return order:", err);
@@ -1383,6 +1442,7 @@ function App() {
   }, [returnOrderId]);
 
   function viewOrderDetails(order: AdminOrder) {
+    if (order.payment_status?.toUpperCase() !== "PAID") return;
     setActiveTrackingOrder(order);
     setStudentSection("orders");
     setPage("Dashboard");
@@ -1472,15 +1532,36 @@ function App() {
     return () => window.removeEventListener("techcircuit:listings-updated", loadListings);
   }, []);
 
+  const [listingsRevision, setListingsRevision] = useState(0);
+
+  useEffect(() => {
+    function handleListingsUpdated() {
+      setListingsRevision((r) => r + 1);
+    }
+    window.addEventListener("techcircuit:listings-updated", handleListingsUpdated);
+    return () => window.removeEventListener("techcircuit:listings-updated", handleListingsUpdated);
+  }, []);
+
   const listings = useMemo(() => {
+    const deletedProjects = getDeletedProjectIds();
+    const customProjects = getLocalCustomProjects();
     const customList = getLocalCustomComponents().filter((item) => item.kind !== "Products");
-    const filteredRemote = remoteListings.filter((item) => item.kind !== "Products");
-    const all = [...filteredRemote, ...customList, ...(ECE_COMPONENTS_CATALOG as Listing[]), ...catalog];
+    const filteredRemote = remoteListings.filter((item) => item.kind !== "Products" && !deletedProjects.has(item.id));
+    const all = [
+      ...customProjects,
+      ...filteredRemote,
+      ...customList,
+      ...(ECE_COMPONENTS_CATALOG as Listing[]),
+      ...catalog.filter((c) => !deletedProjects.has(c.id)),
+    ];
     const seenIds = new Set<string>();
     const seenKeys = new Set<string>();
     const result: Listing[] = [];
 
     for (const item of all) {
+      if (deletedProjects.has(item.id)) {
+        continue;
+      }
       const key = `${item.kind}:${item.title.trim().toLowerCase()}`;
       if (seenIds.has(item.id) || seenKeys.has(key)) {
         continue;
@@ -1490,7 +1571,7 @@ function App() {
       result.push(item);
     }
     return result;
-  }, [remoteListings]);
+  }, [remoteListings, listingsRevision]);
 
   useEffect(() => {
     if (!student) return;
@@ -4459,40 +4540,7 @@ function ProjectCheckoutPage({
       setUpiAwaiting(false);
 
       if (!verifiedOrder) {
-        if (resolvedMode === "sandbox") {
-          verifiedOrder = {
-            id: orderData.order_id,
-            order_id: orderData.order_id,
-            order_number: orderData.order_number || `TCH-ORD-${orderData.order_id.slice(-6).toUpperCase()}`,
-            subtotal: total,
-            shipping_charges: 0,
-            total_amount: total,
-            currency: "INR",
-            payment_gateway: "cashfree",
-            customer_name: fullName.trim(),
-            customer_email: emailAddress.trim(),
-            customer_phone: cleanPhone,
-            shipping_address: shippingAddressPayload,
-            payment_method: normalizedMethod,
-            payment_status: "PAID",
-            tracking_status: "Order Placed",
-            items: activeCartItems.map((item) => ({
-              project_id: item.id,
-              title: item.title,
-              price: projectPrice(item) || (item.id === SPECIAL_OFFER_PROJECT_ID ? 20 : 3499),
-              qty: 1,
-            })),
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-          try {
-            await fetch(`${targetBaseUrl}/api/payments/status?orderId=${encodeURIComponent(orderData.order_id)}&simulate=true&userId=${encodeURIComponent(currentUser?.id || "")}`);
-          } catch {}
-        }
-      }
-
-      if (!verifiedOrder) {
-        throw new Error("Payment verification pending. If amount was debited, our team will confirm your order shortly.");
+        throw new Error("Payment was not completed. If you cancelled or came out of the payment window, your cart is preserved and no order was placed.");
       }
 
       await finalizeSuccessfulOrder(verifiedOrder!, shippingAddressPayload);
@@ -4578,7 +4626,12 @@ function ProjectCheckoutPage({
     try {
       const existingRaw = localStorage.getItem("techcircuit_orders_store");
       const list: AdminOrder[] = existingRaw ? JSON.parse(existingRaw) : [];
-      const filtered = list.filter((o) => o.id !== fullOrderToSave.id && o.order_id !== fullOrderToSave.order_id);
+      const filtered = list.filter(
+        (o) =>
+          o.payment_status?.toUpperCase() === "PAID" &&
+          o.id !== fullOrderToSave.id &&
+          o.order_id !== fullOrderToSave.order_id
+      );
       filtered.unshift(fullOrderToSave);
       localStorage.setItem("techcircuit_orders_store", JSON.stringify(filtered));
       localStorage.setItem("techcircuit-customer-email", shippingPayload.email);
@@ -7413,13 +7466,21 @@ function StudentDashboard({
   const [location, setLocation] = useState("");
   const [interests, setInterests] = useState<string[]>([]);
   const [activityFilter, setActivityFilter] = useState<"all" | TrackableOpportunityKind>("all");
-  const [studentOrders, setStudentOrders] = useState<AdminOrder[]>(() => initialTrackingOrder ? [initialTrackingOrder] : []);
+  const [studentOrders, setStudentOrders] = useState<AdminOrder[]>(() =>
+    initialTrackingOrder && initialTrackingOrder.payment_status?.toUpperCase() === "PAID"
+      ? [initialTrackingOrder]
+      : []
+  );
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState("");
-  const [selectedTrackingOrder, setSelectedTrackingOrder] = useState<AdminOrder | null>(() => initialTrackingOrder || null);
+  const [selectedTrackingOrder, setSelectedTrackingOrder] = useState<AdminOrder | null>(() =>
+    initialTrackingOrder && initialTrackingOrder.payment_status?.toUpperCase() === "PAID"
+      ? initialTrackingOrder
+      : null
+  );
 
   useEffect(() => {
-    if (initialTrackingOrder) {
+    if (initialTrackingOrder && initialTrackingOrder.payment_status?.toUpperCase() === "PAID") {
       setSelectedTrackingOrder(initialTrackingOrder);
     }
   }, [initialTrackingOrder]);
@@ -7478,7 +7539,14 @@ function StudentDashboard({
     let localOrders: AdminOrder[] = [];
     try {
       const raw = localStorage.getItem("techcircuit_orders_store");
-      if (raw) localOrders = JSON.parse(raw);
+      if (raw) {
+        localOrders = (JSON.parse(raw) as AdminOrder[]).filter(
+          (o) =>
+            o.payment_status?.toUpperCase() === "PAID" &&
+            o.tracking_status !== "Deleted" &&
+            o.tracking_status !== "Payment Pending"
+        );
+      }
     } catch {}
 
     fetch(`/api/orders?userId=${encodeURIComponent(userIdToQuery)}&email=${encodeURIComponent(emailToQuery)}`)
@@ -7487,7 +7555,12 @@ function StudentDashboard({
         const text = await res.text();
         let data: any = {};
         try { data = text ? JSON.parse(text) : {}; } catch {}
-        const serverOrders: AdminOrder[] = data.orders || [];
+        const serverOrders: AdminOrder[] = (data.orders || []).filter(
+          (o: any) =>
+            o.payment_status?.toUpperCase() === "PAID" &&
+            o.tracking_status !== "Deleted" &&
+            o.tracking_status !== "Payment Pending"
+        );
 
         const orderMap = new Map<string, AdminOrder>();
         serverOrders.forEach((o) => orderMap.set(o.id, o));
@@ -7496,21 +7569,33 @@ function StudentDashboard({
             orderMap.set(o.id, o);
           }
         });
-        if (initialTrackingOrder && !orderMap.has(initialTrackingOrder.id)) {
+        if (
+          initialTrackingOrder &&
+          initialTrackingOrder.payment_status?.toUpperCase() === "PAID" &&
+          initialTrackingOrder.tracking_status !== "Payment Pending" &&
+          !orderMap.has(initialTrackingOrder.id)
+        ) {
           orderMap.set(initialTrackingOrder.id, initialTrackingOrder);
         }
-        const merged = Array.from(orderMap.values()).sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+        const merged = Array.from(orderMap.values())
+          .filter((o) => o.payment_status?.toUpperCase() === "PAID" && o.tracking_status !== "Payment Pending")
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         setStudentOrders(merged);
       })
       .catch((err) => {
         const orderMap = new Map<string, AdminOrder>();
         localOrders.forEach((o) => orderMap.set(o.id, o));
-        if (initialTrackingOrder && !orderMap.has(initialTrackingOrder.id)) {
+        if (
+          initialTrackingOrder &&
+          initialTrackingOrder.payment_status?.toUpperCase() === "PAID" &&
+          initialTrackingOrder.tracking_status !== "Payment Pending" &&
+          !orderMap.has(initialTrackingOrder.id)
+        ) {
           orderMap.set(initialTrackingOrder.id, initialTrackingOrder);
         }
-        const merged = Array.from(orderMap.values());
+        const merged = Array.from(orderMap.values()).filter(
+          (o) => o.payment_status?.toUpperCase() === "PAID" && o.tracking_status !== "Payment Pending"
+        );
         setStudentOrders(merged);
         if (merged.length === 0) {
           setOrdersError(err instanceof Error ? err.message : "Could not load orders.");
@@ -8481,7 +8566,7 @@ function StudentDashboard({
   );
 }
 
-type AdminSection = "overview" | "orders" | "opportunities" | "components" | "activity" | "profile";
+type AdminSection = "overview" | "orders" | "projects" | "opportunities" | "components" | "activity" | "profile";
 
 interface AdminToast {
   id: number;
@@ -8501,6 +8586,28 @@ function AdminPage({ onExit }: { onExit: () => void }) {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [toast, setToast] = useState<AdminToast | null>(null);
+
+  // Hardware Projects state
+  const [projectRows, setProjectRows] = useState<Listing[]>([]);
+  const [projectRowsRefreshRevision, setProjectRowsRefreshRevision] = useState(0);
+  const [projectSearch, setProjectSearch] = useState("");
+  const [projectCategoryFilter, setProjectCategoryFilter] = useState("all");
+  const [projFormOpen, setProjFormOpen] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState("");
+  const [projTitle, setProjTitle] = useState("");
+  const [projCategory, setProjCategory] = useState("Embedded Systems & IoT");
+  const [projPrice, setProjPrice] = useState("");
+  const [projOrg, setProjOrg] = useState("TechCircuit Hardware Kit");
+  const [projCity, setProjCity] = useState("Ready to ship · All India");
+  const [projSummary, setProjSummary] = useState("");
+  const [projComponentsInput, setProjComponentsInput] = useState("");
+  const [projTagsInput, setProjTagsInput] = useState("");
+  const [projImageUrl, setProjImageUrl] = useState("");
+  const [showProjUrlInput, setShowProjUrlInput] = useState(false);
+  const [projImageUploading, setProjImageUploading] = useState(false);
+  const [projFeatured, setProjFeatured] = useState(false);
+  const [projSaving, setProjSaving] = useState(false);
+  const projFileInputRef = useRef<HTMLInputElement>(null);
 
   // Opportunity state
   const [opportunityRows, setOpportunityRows] = useState<AdminOpportunityListing[]>([]);
@@ -8587,7 +8694,11 @@ function AdminPage({ onExit }: { onExit: () => void }) {
           let data: any = {};
           try { data = text ? JSON.parse(text) : {}; } catch {}
           const serverOrders: AdminOrder[] = (data.orders || []).filter(
-            (o: any) => o.admin_notes !== "deleted" && o.tracking_status !== "Deleted"
+            (o: any) =>
+              o.payment_status?.toUpperCase() === "PAID" &&
+              o.tracking_status !== "Payment Pending" &&
+              o.admin_notes !== "deleted" &&
+              o.tracking_status !== "Deleted"
           );
 
           let localOrders: AdminOrder[] = [];
@@ -8596,7 +8707,11 @@ function AdminPage({ onExit }: { onExit: () => void }) {
             if (raw) {
               const parsed: AdminOrder[] = JSON.parse(raw);
               localOrders = parsed.filter(
-                (o: any) => o.admin_notes !== "deleted" && o.tracking_status !== "Deleted"
+                (o: any) =>
+                  o.payment_status?.toUpperCase() === "PAID" &&
+                  o.tracking_status !== "Payment Pending" &&
+                  o.admin_notes !== "deleted" &&
+                  o.tracking_status !== "Deleted"
               );
             }
           } catch {}
@@ -8608,9 +8723,9 @@ function AdminPage({ onExit }: { onExit: () => void }) {
               orderMap.set(o.id, o);
             }
           });
-          const merged = Array.from(orderMap.values()).sort(
-            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          );
+          const merged = Array.from(orderMap.values())
+            .filter((o) => o.payment_status?.toUpperCase() === "PAID" && o.tracking_status !== "Payment Pending")
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
           setAdminOrders(merged);
         })
         .catch((err) => {
@@ -8621,7 +8736,11 @@ function AdminPage({ onExit }: { onExit: () => void }) {
             if (raw) {
               const parsed: AdminOrder[] = JSON.parse(raw);
               localOrders = parsed.filter(
-                (o: any) => o.admin_notes !== "deleted" && o.tracking_status !== "Deleted"
+                (o: any) =>
+                  o.payment_status?.toUpperCase() === "PAID" &&
+                  o.tracking_status !== "Payment Pending" &&
+                  o.admin_notes !== "deleted" &&
+                  o.tracking_status !== "Deleted"
               );
             }
           } catch {}
@@ -8679,6 +8798,10 @@ function AdminPage({ onExit }: { onExit: () => void }) {
             setOppFormOpen(false);
             return;
           }
+          if (projFormOpen) {
+            setProjFormOpen(false);
+            return;
+          }
           if (compFormOpen) {
             setCompFormOpen(false);
             return;
@@ -8700,6 +8823,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     mobileMenuOpen,
     selectedAdminOrder,
     oppFormOpen,
+    projFormOpen,
     compFormOpen,
     onExit,
   ]);
@@ -8999,29 +9123,31 @@ function AdminPage({ onExit }: { onExit: () => void }) {
   const filteredOrders = useMemo(() => {
     return adminOrders
       .filter((order) => {
-        if (orderFilterTab === "paid" && order.payment_status !== "PAID") return false;
+        // Enforce that only completed PAID orders appear in admin views
+        if (order.payment_status?.toUpperCase() !== "PAID") return false;
+        if (order.tracking_status === "Payment Pending" || order.tracking_status === "Deleted") return false;
+
+        if (orderFilterTab === "paid") return true;
         if (
           orderFilterTab === "new" &&
-          (order.payment_status !== "PAID" ||
-            (order.tracking_status !== "Order Placed" && order.tracking_status !== "Confirmed"))
+          order.tracking_status !== "Order Placed" &&
+          order.tracking_status !== "Confirmed"
         )
           return false;
         if (
           orderFilterTab === "building" &&
-          (order.payment_status !== "PAID" ||
-            (order.tracking_status !== "Building (Processing)" &&
-              order.tracking_status !== "Testing / Quality Check" &&
-              order.tracking_status !== "Packed"))
+          order.tracking_status !== "Building (Processing)" &&
+          order.tracking_status !== "Testing / Quality Check" &&
+          order.tracking_status !== "Packed"
         )
           return false;
-        if (orderFilterTab === "shipped" && (order.payment_status !== "PAID" || order.tracking_status !== "Shipped"))
+        if (orderFilterTab === "shipped" && order.tracking_status !== "Shipped")
           return false;
-        if (orderFilterTab === "delivered" && (order.payment_status !== "PAID" || order.tracking_status !== "Delivered"))
+        if (orderFilterTab === "delivered" && order.tracking_status !== "Delivered")
           return false;
         if (orderFilterTab === "cancelled" && order.tracking_status !== "Cancelled" && order.tracking_status !== "Refunded")
           return false;
-        if (orderFilterTab === "issues" && order.payment_status !== "PENDING" && order.payment_status !== "FAILED")
-          return false;
+        if (orderFilterTab === "issues") return false;
 
         if (orderDateRange !== "all") {
           const orderDate = new Date(order.created_at).getTime();
@@ -9124,6 +9250,11 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     }
     void restoreAdminSession();
   }, [supabase]);
+
+  // Load Hardware Project Listings
+  useEffect(() => {
+    setProjectRows(loadAdminProjectListings());
+  }, [projectRowsRefreshRevision]);
 
   // Load Component Listings
   useEffect(() => {
@@ -9636,7 +9767,275 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     );
   }
 
+  // Hardware Projects Management Handlers
+  function startCreateProject() {
+    setEditingProjectId("");
+    setProjTitle("");
+    setProjCategory("Embedded Systems & IoT");
+    setProjPrice("");
+    setProjOrg("TechCircuit Hardware Kit");
+    setProjCity("Ready to ship · All India");
+    setProjSummary("");
+    setProjComponentsInput("");
+    setProjTagsInput("");
+    setProjImageUrl("");
+    setShowProjUrlInput(false);
+    setProjImageUploading(false);
+    setProjFeatured(false);
+    setProjFormOpen(true);
+  }
+
+  function startEditProject(project: Listing) {
+    setEditingProjectId(project.id);
+    setProjTitle(project.title);
+    setProjCategory(project.projectCategory || "Embedded Systems & IoT");
+    setProjPrice(project.projectPrice ? String(project.projectPrice) : "");
+    setProjOrg(project.organization || "TechCircuit Hardware Kit");
+    setProjCity(project.city || "Ready to ship · All India");
+    setProjSummary(project.summary || "");
+    setProjComponentsInput((project.components || []).join("\n"));
+    setProjTagsInput((project.tags || []).join(", "));
+    setProjImageUrl(project.imageUrl || "");
+    setShowProjUrlInput(Boolean(project.imageUrl && (project.imageUrl.startsWith("http") || project.imageUrl.startsWith("/"))));
+    setProjImageUploading(false);
+    setProjFeatured(Boolean(project.featured));
+    setProjFormOpen(true);
+    window.scrollTo({ top: 120, behavior: "smooth" });
+  }
+
+  async function handleProjectImageFileSelect(file: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("Please choose a valid image file (PNG, JPG, JPEG, WEBP, SVG, GIF, etc.).", "error");
+      return;
+    }
+    setProjImageUploading(true);
+    try {
+      if (file.type === "image/svg+xml" || file.size < 400 * 1024) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setProjImageUrl(reader.result as string);
+          setProjImageUploading(false);
+          showToast("Project photo loaded from gallery.", "success");
+        };
+        reader.onerror = () => {
+          setProjImageUploading(false);
+          showToast("Could not read image file.", "error");
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new window.Image();
+        img.onload = () => {
+          const maxDim = 1200;
+          let width = img.width;
+          let height = img.height;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            setProjImageUrl(reader.result as string);
+            setProjImageUploading(false);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const output = canvas.toDataURL("image/webp", 0.88);
+          setProjImageUrl(output);
+          setProjImageUploading(false);
+          showToast("Project photo optimized and loaded.", "success");
+        };
+        img.onerror = () => {
+          setProjImageUploading(false);
+          showToast("Could not process selected image.", "error");
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => {
+        setProjImageUploading(false);
+        showToast("Could not read image file.", "error");
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      setProjImageUploading(false);
+      showToast("Image loading error.", "error");
+    }
+  }
+
+  async function deleteProject(project: Listing) {
+    if (!isAdmin) return;
+    if (!window.confirm(`Permanently remove hardware project "${project.title}" from catalog?`)) return;
+
+    try {
+      const client = supabase || getSupabase();
+      if (client) {
+        try {
+          await client.from("listings").delete().eq("id", project.id);
+        } catch (dbErr) {
+          console.warn("Direct Supabase project delete note:", dbErr);
+        }
+      }
+
+      const custom = getLocalCustomProjects().filter((x) => x.id !== project.id);
+      localStorage.setItem("techcircuit:custom_projects", JSON.stringify(custom));
+
+      const deleted = getDeletedProjectIds();
+      deleted.add(project.id);
+      localStorage.setItem("techcircuit:deleted_projects", JSON.stringify(Array.from(deleted)));
+
+      setProjectRows((rows) => rows.filter((r) => r.id !== project.id));
+      showToast(`Removed "${project.title}" from project catalog.`, "success");
+      setProjectRowsRefreshRevision((r) => r + 1);
+      window.dispatchEvent(new Event("techcircuit:listings-updated"));
+    } catch {
+      showToast("Error deleting project.", "error");
+    }
+  }
+
+  async function saveProject(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!isAdmin) return;
+
+    if (!projTitle.trim()) {
+      showToast("Please enter a project title.", "error");
+      return;
+    }
+    const parsedPrice = Number(projPrice);
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+      showToast("Please enter a valid kit price in INR (e.g. 1499).", "error");
+      return;
+    }
+    if (!projSummary.trim()) {
+      showToast("Please provide a project description / summary.", "error");
+      return;
+    }
+
+    const parsedComponents = projComponentsInput
+      .split(/[\n,]/)
+      .map((s) => s.trim().replace(/^[-*•]\s*/, ""))
+      .filter(Boolean);
+
+    const parsedTags = projTagsInput
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (projCategory.trim() && !parsedTags.includes(projCategory.trim())) {
+      parsedTags.unshift(projCategory.trim());
+    }
+
+    const cleanImgUrl = safeImageUrl(projImageUrl.trim()) || projImageUrl.trim();
+
+    setProjSaving(true);
+    try {
+      const targetId = editingProjectId || `project-custom-${Date.now()}`;
+      const projectItem: Listing = {
+        id: targetId,
+        kind: "Projects",
+        title: projTitle.trim(),
+        organization: projOrg.trim() || "TechCircuit Hardware Kit",
+        city: projCity.trim() || "Ready to ship · All India",
+        summary: projSummary.trim(),
+        tags: parsedTags.length > 0 ? parsedTags : [projCategory.trim() || "Hardware Kit"],
+        projectCategory: projCategory.trim() || "Embedded Systems & IoT",
+        projectPrice: parsedPrice,
+        imageUrl: cleanImgUrl || undefined,
+        components: parsedComponents.length > 0 ? parsedComponents : ["Complete hardware kit", "Circuit board", "Tested components"],
+        featured: projFeatured,
+        verified: true,
+        updated: new Date().toISOString(),
+      };
+
+      const client = supabase || getSupabase();
+      if (client) {
+        try {
+          const payload = {
+            id: targetId,
+            kind: "Projects",
+            title: projectItem.title,
+            organization: projectItem.organization,
+            city: projectItem.city,
+            summary: projectItem.summary,
+            tags: projectItem.tags,
+            components: projectItem.components,
+            verified: true,
+            featured: projectItem.featured,
+            is_published: true,
+            updated_at: new Date().toISOString(),
+          };
+          if (editingProjectId) {
+            await client.from("listings").update(payload).eq("id", editingProjectId);
+          } else {
+            await client.from("listings").insert(payload);
+          }
+        } catch (dbErr) {
+          console.warn("Direct Supabase project save note:", dbErr);
+        }
+      }
+
+      const custom = getLocalCustomProjects();
+      const updatedCustom = editingProjectId
+        ? custom.some((x) => x.id === editingProjectId)
+          ? custom.map((x) => (x.id === editingProjectId ? projectItem : x))
+          : [projectItem, ...custom]
+        : [projectItem, ...custom];
+      localStorage.setItem("techcircuit:custom_projects", JSON.stringify(updatedCustom));
+
+      const deleted = getDeletedProjectIds();
+      if (deleted.has(targetId)) {
+        deleted.delete(targetId);
+        localStorage.setItem("techcircuit:deleted_projects", JSON.stringify(Array.from(deleted)));
+      }
+
+      setProjFormOpen(false);
+      setEditingProjectId("");
+      setProjTitle("");
+      setProjPrice("");
+      setProjSummary("");
+      setProjComponentsInput("");
+      setProjTagsInput("");
+      setProjImageUrl("");
+      setProjFeatured(false);
+      setProjectRowsRefreshRevision((r) => r + 1);
+      window.dispatchEvent(new Event("techcircuit:listings-updated"));
+      showToast(editingProjectId ? `Updated project: "${projectItem.title}"` : `Project "${projectItem.title}" published!`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not save project.", "error");
+    } finally {
+      setProjSaving(false);
+    }
+  }
+
   // Filtered lists
+  const projectCategories = useMemo(() => {
+    const set = new Set<string>();
+    projectRows.forEach((p) => {
+      if (p.projectCategory) set.add(p.projectCategory);
+    });
+    return Array.from(set).sort();
+  }, [projectRows]);
+
+  const filteredProjects = useMemo(() => {
+    return projectRows.filter((item) => {
+      if (projectCategoryFilter !== "all" && item.projectCategory !== projectCategoryFilter) return false;
+      if (!projectSearch.trim()) return true;
+      const q = projectSearch.toLowerCase();
+      const text = `${item.title} ${item.organization} ${item.projectCategory ?? ""} ${item.summary} ${(item.tags || []).join(" ")} ${(item.components || []).join(" ")}`.toLowerCase();
+      return text.includes(q);
+    });
+  }, [projectRows, projectCategoryFilter, projectSearch]);
+
   const filteredOpportunities = useMemo(() => {
     return opportunityRows.filter((item) => {
       if (oppKindFilter !== "all" && item.kind !== oppKindFilter) return false;
@@ -9678,6 +10077,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
   const draftOppCount = opportunityRows.filter((r) => !r.isPublished).length;
   const appliedCount = opportunityActivities.filter((a) => a.status === "applied").length;
   const visitedCount = opportunityActivities.filter((a) => a.status === "visited").length;
+  const featuredProjectsCount = projectRows.filter((p) => p.featured).length;
 
   return (
     <div className="admin-app">
@@ -9843,6 +10243,12 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                     ).length,
                   },
                   {
+                    id: "projects",
+                    label: "Hardware Projects",
+                    icon: CircuitBoard,
+                    count: projectRows.length,
+                  },
+                  {
                     id: "opportunities",
                     label: "Opportunities",
                     icon: BriefcaseBusiness,
@@ -9948,6 +10354,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                   <h1 className="admin-crumb-current">
                     {adminSection === "overview" && "Executive Overview"}
                     {adminSection === "orders" && "Hardware Kit Orders & Tracking"}
+                    {adminSection === "projects" && "Hardware Projects & Kits"}
                     {adminSection === "opportunities" && "Opportunity Management"}
                     {adminSection === "components" && "Component Catalog & Offers"}
                     {adminSection === "activity" && "Student Activity Tracker"}
@@ -9991,11 +10398,21 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                         , Administrator.
                       </h2>
                       <p>
-                        Real-time hub for student internships, corporate training, hackathons, and electronics component price intelligence.
+                        Real-time hub for hardware kit assembly, projects, student internships, corporate training, and electronics component price intelligence.
                       </p>
                       <div className="admin-hero-actions">
                         <button
                           className="button button-primary"
+                          type="button"
+                          onClick={() => {
+                            setAdminSection("projects");
+                            startCreateProject();
+                          }}
+                        >
+                          <Plus size={16} /> New Project Kit
+                        </button>
+                        <button
+                          className="button button-outline admin-hero-outline-btn"
                           type="button"
                           onClick={() => {
                             setAdminSection("opportunities");
@@ -10028,24 +10445,24 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                     </div>
                   </div>
 
-                  {/* 4 Interactive KPI Metric Cards */}
+                  {/* 5 Interactive KPI Metric Cards */}
                   <div className="admin-kpi-grid">
                     <div
                       className="admin-kpi-card"
                       role="button"
                       tabIndex={0}
-                      onClick={() => setAdminSection("opportunities")}
+                      onClick={() => setAdminSection("projects")}
                     >
                       <div className="admin-kpi-header">
-                        <span className="admin-kpi-title">OPPORTUNITIES</span>
+                        <span className="admin-kpi-title">HARDWARE PROJECTS</span>
                         <div className="admin-kpi-icon icon-cyan">
-                          <BriefcaseBusiness size={20} />
+                          <CircuitBoard size={20} />
                         </div>
                       </div>
-                      <div className="admin-kpi-metric">{opportunityRows.length}</div>
+                      <div className="admin-kpi-metric">{projectRows.length}</div>
                       <div className="admin-kpi-sub">
-                        <span className="badge badge-success">{publishedOppCount} Published</span>
-                        <span className="badge badge-draft">{draftOppCount} Drafts</span>
+                        <span className="badge badge-success">{featuredProjectsCount} Featured</span>
+                        <span className="badge badge-info">Student Ready</span>
                       </div>
                     </div>
 
@@ -10065,6 +10482,25 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       <div className="admin-kpi-sub">
                         <span className="badge badge-success">{newOrdersCount} New</span>
                         <span className="badge" style={{ background: "#FEF3C7", color: "#B45309" }}>{inBuildOrdersCount} In Build</span>
+                      </div>
+                    </div>
+
+                    <div
+                      className="admin-kpi-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setAdminSection("opportunities")}
+                    >
+                      <div className="admin-kpi-header">
+                        <span className="admin-kpi-title">OPPORTUNITIES</span>
+                        <div className="admin-kpi-icon icon-cyan">
+                          <BriefcaseBusiness size={20} />
+                        </div>
+                      </div>
+                      <div className="admin-kpi-metric">{opportunityRows.length}</div>
+                      <div className="admin-kpi-sub">
+                        <span className="badge badge-success">{publishedOppCount} Published</span>
+                        <span className="badge badge-draft">{draftOppCount} Drafts</span>
                       </div>
                     </div>
 
@@ -11278,6 +11714,458 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                           </div>
                         </article>
                       ))}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {/* SECTION: HARDWARE PROJECTS CATALOG */}
+              {adminSection === "projects" && (
+                <section className="admin-projects-view">
+                  <div className="admin-section-header">
+                    <div>
+                      <div className="eyebrow"><span className="eyebrow-line" /> HARDWARE KITS &amp; PROJECTS</div>
+                      <h2>Hardware Projects &amp; DIY Kits</h2>
+                      <p className="admin-section-desc">
+                        Create, edit, and publish hardware project kits with BOM components, student pricing, and gallery photos.
+                      </p>
+                    </div>
+                    <div className="admin-header-actions">
+                      <button
+                        className="button button-primary"
+                        type="button"
+                        onClick={() => {
+                          if (projFormOpen && !editingProjectId) {
+                            setProjFormOpen(false);
+                          } else {
+                            startCreateProject();
+                          }
+                        }}
+                      >
+                        {projFormOpen && !editingProjectId ? (
+                          <>
+                            <X size={16} /> Close Form
+                          </>
+                        ) : (
+                          <>
+                            <Plus size={16} /> Add Project
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Project Form Panel */}
+                  {projFormOpen && (
+                    <div className="admin-form-panel">
+                      <div className="admin-form-panel-head">
+                        <div>
+                          <span className="eyebrow">
+                            <span className="eyebrow-line" />{" "}
+                            {editingProjectId ? "UPDATE HARDWARE KIT" : "NEW PROJECT KIT"}
+                          </span>
+                          <h3>{editingProjectId ? "Edit Project Kit & BOM" : "Add Hardware Project Kit"}</h3>
+                        </div>
+                        <button
+                          className="admin-form-close-btn"
+                          type="button"
+                          onClick={() => setProjFormOpen(false)}
+                          aria-label="Close form"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+
+                      <form onSubmit={saveProject} className="admin-form-grid">
+                        <div className="admin-field-full">
+                          <label>Project Kit Title</label>
+                          <input
+                            required
+                            placeholder="e.g. Smart IoT Weather Station with ESP32 & OLED"
+                            value={projTitle}
+                            onChange={(e) => setProjTitle(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Project Category</label>
+                          <select
+                            value={projCategory}
+                            onChange={(e) => setProjCategory(e.target.value)}
+                            className="checkout-input-field"
+                            style={{ width: "100%", height: "42px", borderRadius: "10px", padding: "0 12px" }}
+                          >
+                            <option value="Embedded Systems & IoT">Embedded Systems &amp; IoT</option>
+                            <option value="PCB Design">PCB Design</option>
+                            <option value="Microcontroller-Based Project">Microcontroller-Based Project</option>
+                            <option value="IoT Project">IoT Project</option>
+                            <option value="Medical-Based IoT Project">Medical-Based IoT Project</option>
+                            <option value="Final Year Project">Final Year Project</option>
+                            <option value="Mini Project">Mini Project</option>
+                            <option value="Robotics & Automation">Robotics &amp; Automation</option>
+                            <option value="Power Electronics">Power Electronics</option>
+                            <option value="Electronics Starter Kit">Electronics Starter Kit</option>
+                          </select>
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Student Kit Price (INR ₹)</label>
+                          <input
+                            required
+                            type="number"
+                            min="1"
+                            step="1"
+                            placeholder="e.g. 1499"
+                            value={projPrice}
+                            onChange={(e) => setProjPrice(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Manufacturer / Kit Provider</label>
+                          <input
+                            placeholder="e.g. TechCircuit Hardware Kit"
+                            value={projOrg}
+                            onChange={(e) => setProjOrg(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field">
+                          <label>Shipping / Availability Scope</label>
+                          <input
+                            placeholder="e.g. Ready to ship · All India"
+                            value={projCity}
+                            onChange={(e) => setProjCity(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field-full">
+                          <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={projFeatured}
+                              onChange={(e) => setProjFeatured(e.target.checked)}
+                              style={{ width: "18px", height: "18px", accentColor: "#0284c7" }}
+                            />
+                            <span style={{ fontWeight: 700, color: "#0F1F3D", fontSize: "13.5px" }}>
+                              Feature this kit (shows Featured ribbon badge and prioritizes at top)
+                            </span>
+                          </label>
+                        </div>
+
+                        <div className="admin-field-full">
+                          <label>Project Description &amp; Learning Outcomes</label>
+                          <textarea
+                            required
+                            rows={3}
+                            placeholder="Describe what the student builds, key circuit features, firmware capability, and learning outcomes..."
+                            value={projSummary}
+                            onChange={(e) => setProjSummary(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field-full">
+                          <label>Included Components (Bill of Materials - BOM)</label>
+                          <p style={{ margin: "2px 0 6px", fontSize: "12px", color: "#64748B" }}>
+                            Enter one component per line (or comma-separated). Students can review these parts before purchasing.
+                          </p>
+                          <textarea
+                            rows={4}
+                            placeholder={"1x ESP32 NodeMCU Wi-Fi + BLE Dev Board\n1x DHT22 Temperature & Humidity Sensor\n1x 0.96 inch I2C OLED Display (128x64)\n1x Solderless Breadboard (830 tie-points)\n40x Dupont Jumper Wires (Male-to-Female)\n1x Micro-USB Programming Cable"}
+                            value={projComponentsInput}
+                            onChange={(e) => setProjComponentsInput(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field-full">
+                          <label>Search &amp; Catalog Tags (Comma-separated)</label>
+                          <input
+                            placeholder="e.g. ESP32, IoT, Wireless, Sensors, Arduino, Cloud"
+                            value={projTagsInput}
+                            onChange={(e) => setProjTagsInput(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="admin-field-full">
+                          <label>Project Photo (Upload from Gallery or Device)</label>
+                          <input
+                            ref={projFileInputRef}
+                            type="file"
+                            accept="image/*"
+                            style={{ display: "none" }}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) void handleProjectImageFileSelect(file);
+                              e.target.value = "";
+                            }}
+                          />
+
+                          <div className="admin-gallery-uploader">
+                            {projImageUrl ? (
+                              <div className="admin-gallery-preview-card">
+                                <div className="admin-gallery-preview-left">
+                                  <img
+                                    className="admin-gallery-thumb"
+                                    src={projImageUrl}
+                                    alt="Project Preview"
+                                    onError={(e) => {
+                                      (e.target as HTMLElement).style.display = "none";
+                                    }}
+                                  />
+                                  <div className="admin-gallery-meta">
+                                    <span className="admin-gallery-badge">
+                                      <CheckCircle2 size={12} /> Photo Ready
+                                    </span>
+                                    <span className="admin-gallery-filename">
+                                      {projImageUrl.startsWith("data:")
+                                        ? "Image loaded from Gallery / Files"
+                                        : projImageUrl.split("/").pop() || "Project Image"}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="admin-gallery-actions">
+                                  <button
+                                    type="button"
+                                    className="admin-gallery-btn-replace"
+                                    onClick={() => projFileInputRef.current?.click()}
+                                    disabled={projImageUploading}
+                                  >
+                                    <UploadCloud size={14} /> Replace
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="admin-gallery-btn-remove"
+                                    onClick={() => setProjImageUrl("")}
+                                    title="Remove image"
+                                  >
+                                    <Trash2 size={14} /> Remove
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div
+                                className="admin-gallery-dropzone"
+                                onClick={() => projFileInputRef.current?.click()}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  const file = e.dataTransfer.files?.[0];
+                                  if (file) void handleProjectImageFileSelect(file);
+                                }}
+                              >
+                                <div className="admin-gallery-icon-wrap">
+                                  {projImageUploading ? (
+                                    <RefreshCw className="animate-spin" size={24} />
+                                  ) : (
+                                    <UploadCloud size={24} />
+                                  )}
+                                </div>
+                                <div className="admin-gallery-title">
+                                  {projImageUploading ? (
+                                    "Processing photo..."
+                                  ) : (
+                                    <>
+                                      <span>Click to upload project photo</span> or drag &amp; drop
+                                    </>
+                                  )}
+                                </div>
+                                <p className="admin-gallery-subtitle">
+                                  Supports PNG, JPG, JPEG, WEBP, SVG, GIF (optimizes automatically)
+                                </p>
+                              </div>
+                            )}
+
+                            <div>
+                              <button
+                                type="button"
+                                className="admin-gallery-url-toggle"
+                                onClick={() => setShowProjUrlInput((v) => !v)}
+                              >
+                                {showProjUrlInput ? "Hide Direct Image URL" : "Or use an Image URL"}
+                              </button>
+                              {showProjUrlInput && (
+                                <div style={{ marginTop: 8 }}>
+                                  <input
+                                    type="text"
+                                    placeholder="https://example.com/project-kit.jpg"
+                                    value={projImageUrl}
+                                    onChange={(e) => setProjImageUrl(e.target.value)}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="admin-form-actions admin-field-full">
+                          <button
+                            type="button"
+                            className="button button-outline"
+                            onClick={() => setProjFormOpen(false)}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="button button-dark"
+                            disabled={projSaving}
+                          >
+                            {projSaving ? (
+                              <>
+                                <RefreshCw size={15} className="spin-icon" /> Saving Kit…
+                              </>
+                            ) : (
+                              <>
+                                <Check size={16} /> {editingProjectId ? "Update Project Kit" : "Publish to Projects Page"}
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+
+                  {/* Search and Category Filter Toolbar */}
+                  <div className="admin-filter-bar" style={{ flexWrap: "wrap", gap: "12px" }}>
+                    <div className="admin-search-wrapper" style={{ flex: 1, minWidth: "260px" }}>
+                      <Search size={16} className="admin-search-icon" />
+                      <input
+                        type="text"
+                        placeholder="Search by project title, kit parts, category, tags…"
+                        value={projectSearch}
+                        onChange={(e) => setProjectSearch(e.target.value)}
+                      />
+                      {projectSearch && (
+                        <button
+                          type="button"
+                          className="admin-clear-search"
+                          onClick={() => setProjectSearch("")}
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ minWidth: "200px" }}>
+                      <select
+                        className="checkout-input-field"
+                        style={{ height: "40px", borderRadius: "10px", padding: "0 12px", width: "100%" }}
+                        value={projectCategoryFilter}
+                        onChange={(e) => setProjectCategoryFilter(e.target.value)}
+                      >
+                        <option value="all">All Categories ({projectRows.length})</option>
+                        {projectCategories.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat} ({projectRows.filter((p) => p.projectCategory === cat).length})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="admin-item-count-badge">
+                      <span>{filteredProjects.length} projects displayed</span>
+                    </div>
+                  </div>
+
+                  {/* Hardware Projects Grid */}
+                  {filteredProjects.length === 0 ? (
+                    <div className="admin-empty-state">
+                      <CircuitBoard size={40} />
+                      <h3>No hardware projects found</h3>
+                      <p>Add hardware kits with included BOM components to empower students.</p>
+                      <button className="button button-outline button-small" onClick={startCreateProject}>
+                        <Plus size={14} /> Add Project
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="admin-projects-grid">
+                      {filteredProjects.map((project) => {
+                        const parts = project.components || [];
+                        return (
+                          <article className="admin-project-card" key={project.id}>
+                            <div className="admin-project-img-box">
+                              {project.imageUrl ? (
+                                <img
+                                  src={project.imageUrl}
+                                  alt={project.title}
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = "none";
+                                  }}
+                                />
+                              ) : (
+                                <CircuitBoard size={48} className="admin-project-fallback-icon" />
+                              )}
+                              <div className="admin-project-img-overlay">
+                                <div className="admin-project-badges">
+                                  {project.featured && (
+                                    <span className="badge badge-success" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                      <Sparkles size={11} /> Featured
+                                    </span>
+                                  )}
+                                  <span className="badge badge-info" style={{ textTransform: "capitalize" }}>
+                                    {project.projectCategory || "Hardware Kit"}
+                                  </span>
+                                </div>
+                                <span className="admin-project-price-tag">
+                                  {formatRupee(project.projectPrice || 0)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="admin-project-card-body">
+                              <h4>{project.title}</h4>
+                              <div className="admin-project-meta-row">
+                                <span className="admin-project-meta-item">
+                                  <Building2 size={13} /> {project.organization || "TechCircuit"}
+                                </span>
+                                <span className="admin-project-meta-item">
+                                  <MapPin size={13} /> {project.city || "All India"}
+                                </span>
+                              </div>
+                              <p className="admin-project-desc">{project.summary}</p>
+
+                              {parts.length > 0 && (
+                                <div className="admin-project-bom-preview">
+                                  <div className="admin-project-bom-title">
+                                    <Layers3 size={12} /> Included Kit BOM ({parts.length} parts)
+                                  </div>
+                                  <div className="admin-project-bom-tags">
+                                    {parts.slice(0, 3).map((comp, cIdx) => (
+                                      <span className="admin-project-bom-pill" key={cIdx} title={comp}>
+                                        {comp}
+                                      </span>
+                                    ))}
+                                    {parts.length > 3 && (
+                                      <span className="admin-project-bom-more">
+                                        +{parts.length - 3} more
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="admin-project-card-footer">
+                              <button
+                                className="button button-outline button-small"
+                                type="button"
+                                onClick={() => startEditProject(project)}
+                              >
+                                <Edit size={14} /> Edit Kit &amp; BOM
+                              </button>
+                              <button
+                                className="button button-danger-ghost button-small"
+                                type="button"
+                                onClick={() => void deleteProject(project)}
+                                title="Remove hardware project from catalog"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </article>
+                        );
+                      })}
                     </div>
                   )}
                 </section>

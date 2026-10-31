@@ -91,21 +91,26 @@ export default async function handler(req, res) {
     if (supabaseUrl && supabaseKey) {
       try {
         const orderPayload = req.body;
-        const sRes = await fetch(`${supabaseUrl}/rest/v1/orders`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            apikey: supabaseKey,
-            authorization: `Bearer ${supabaseKey}`,
-            prefer: "resolution=merge-duplicates,return=representation",
-          },
-          body: JSON.stringify(orderPayload),
-        });
-        if (sRes.ok) {
-          const data = await sRes.json();
-          return res.status(200).json({ ok: true, order: data });
+        // Strictly only allow saving orders that have payment_status === 'PAID'
+        if (orderPayload && (orderPayload.payment_status === "PAID" || orderPayload.payment_status === "paid")) {
+          const sRes = await fetch(`${supabaseUrl}/rest/v1/orders`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              apikey: supabaseKey,
+              authorization: `Bearer ${supabaseKey}`,
+              prefer: "resolution=merge-duplicates,return=representation",
+            },
+            body: JSON.stringify(orderPayload),
+          });
+          if (sRes.ok) {
+            const data = await sRes.json();
+            return res.status(200).json({ ok: true, order: data });
+          } else {
+            console.warn("Supabase POST order response not ok:", sRes.status, await sRes.text());
+          }
         } else {
-          console.warn("Supabase POST order response not ok:", sRes.status, await sRes.text());
+          return res.status(400).json({ error: "Cannot register an order before payment is completed." });
         }
       } catch (err) {
         console.error("Order Supabase save error:", err);
@@ -180,6 +185,8 @@ export default async function handler(req, res) {
           url.searchParams.set("customer_email", `eq.${userEmail}`);
         }
       }
+      // Strictly only fetch paid orders from database
+      url.searchParams.set("payment_status", "ilike.paid");
       url.searchParams.set("order", "created_at.desc");
 
       const sRes = await fetch(url.toString(), {
@@ -192,7 +199,13 @@ export default async function handler(req, res) {
       if (sRes.ok) {
         const orders = await sRes.json();
         const activeOrders = Array.isArray(orders)
-          ? orders.filter((o) => o.admin_notes !== "deleted" && o.tracking_status !== "Deleted")
+          ? orders.filter(
+              (o) =>
+                o.payment_status?.toUpperCase() === "PAID" &&
+                o.tracking_status !== "Payment Pending" &&
+                o.admin_notes !== "deleted" &&
+                o.tracking_status !== "Deleted"
+            )
           : [];
         return res.status(200).json({ orders: activeOrders });
       } else {

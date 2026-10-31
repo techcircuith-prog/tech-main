@@ -214,7 +214,7 @@ export default async function handler(req, res) {
             cashfree_order_id: cashfreeOrderId,
             payment_session_id: cfData.payment_session_id,
             payment_status: "PENDING",
-            tracking_status: "Order Placed",
+            tracking_status: "Payment Pending",
           }),
         });
       } catch (sbErr) {
