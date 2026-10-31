@@ -1532,17 +1532,25 @@ function App() {
       setUserRole((prev) => prev || "student");
       setAuthOpen(false);
 
+      const targetPage = localStorage.getItem("techcircuit_oauth_target_page") || sessionStorage.getItem("techcircuit_oauth_target_page");
       if (fromOAuth) {
         sessionStorage.removeItem("techcircuit_oauth_in_progress");
         localStorage.removeItem("techcircuit_oauth_in_progress");
+        sessionStorage.removeItem("techcircuit_oauth_target_page");
+        localStorage.removeItem("techcircuit_oauth_target_page");
       }
 
       const currentPath = window.location.pathname.replace(/\/+$/, "");
-      if (hasCode || ["/login", "/signin", "/student-login", "/auth"].includes(currentPath)) {
-        const cleanPath = ["/login", "/signin", "/student-login", "/auth"].includes(currentPath)
-          ? "/"
-          : (window.location.pathname || "/");
-        window.history.replaceState({}, document.title, cleanPath);
+      const isAuthPath = ["/login", "/signin", "/student-login", "/auth"].includes(currentPath);
+      const isDashboardTarget = targetPage === "Dashboard" || currentPath === "/dashboard" || fromOAuth;
+
+      if (hasCode || isAuthPath || isDashboardTarget) {
+        const cleanPath = isDashboardTarget
+          ? "/dashboard"
+          : isAuthPath
+            ? "/"
+            : (window.location.pathname || "/");
+        window.history.replaceState({ page: isDashboardTarget ? "Dashboard" : "Home", isRoot: !isDashboardTarget, hasDetail: false }, document.title, cleanPath);
       }
 
       const role = await resolveUserRole(client, user);
@@ -1550,7 +1558,7 @@ function App() {
       if (isRecoveryCallback) {
         setAuthRecovery(true);
         setAuthOpen(true);
-      } else if (fromOAuth) {
+      } else if (fromOAuth || isDashboardTarget) {
         const displayName =
           (user.user_metadata?.full_name as string | undefined)?.trim() ||
           (user.user_metadata?.name as string | undefined)?.trim() ||
@@ -1559,7 +1567,7 @@ function App() {
           (user.email ? user.email.split("@")[0] : "Student");
         showToast(`Welcome back, ${displayName}! Signed in with Google.`, "success");
 
-        if (role === "student" && page !== "Checkout" && page !== "Cart" && page !== "PaymentResult") {
+        if (role === "student" && currentPath !== "/checkout" && currentPath !== "/cart" && currentPath !== "/payment-result") {
           setPage("Dashboard");
           setStudentSection("overview");
         }
@@ -2069,6 +2077,18 @@ function App() {
               {item.label}
             </button>
           ))}
+          {currentUser && userRole !== "admin" && (
+            <button
+              className={page === "Dashboard" ? "nav-link active" : "nav-link"}
+              onClick={() => {
+                setStudentSection("overview");
+                navigate("Dashboard");
+              }}
+              style={{ fontWeight: 700 }}
+            >
+              Dashboard
+            </button>
+          )}
         </nav>
         <div className="header-actions">
           <button
@@ -7257,12 +7277,17 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
       try {
         sessionStorage.setItem("techcircuit_oauth_in_progress", "true");
         localStorage.setItem("techcircuit_oauth_in_progress", "true");
+        localStorage.setItem("techcircuit_oauth_target_page", "Dashboard");
+        if (name && name.trim()) {
+          sessionStorage.setItem("techcircuit_intended_name", name.trim());
+          localStorage.setItem("techcircuit_intended_name", name.trim());
+        }
       } catch {}
 
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: window.location.origin,
+          redirectTo: `${window.location.origin}/dashboard`,
           queryParams: {
             access_type: "offline",
             prompt: "consent",
@@ -7272,12 +7297,14 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
       if (oauthError) {
         sessionStorage.removeItem("techcircuit_oauth_in_progress");
         localStorage.removeItem("techcircuit_oauth_in_progress");
+        localStorage.removeItem("techcircuit_oauth_target_page");
         setError(`Could not continue with Google: ${oauthError.message}`);
         setBusy(false);
       }
     } catch (e: any) {
       sessionStorage.removeItem("techcircuit_oauth_in_progress");
       localStorage.removeItem("techcircuit_oauth_in_progress");
+      localStorage.removeItem("techcircuit_oauth_target_page");
       setError(e?.message || "Could not connect to Google sign-in. Please try again.");
       setBusy(false);
     }
@@ -7606,7 +7633,6 @@ function StudentDashboard({
   const [opportunityActivityLoadError, setOpportunityActivityLoadError] = useState("");
   const [profileLoading, setProfileLoading] = useState(Boolean(student));
   const [profileLoaded, setProfileLoaded] = useState(false);
-  const [profileSetupRequired, setProfileSetupRequired] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
   const [profileName, setProfileName] = useState(student?.user_metadata.name ?? "");
@@ -7883,7 +7909,6 @@ function StudentDashboard({
     if (!supabase) {
       setProfileLoading(false);
       setProfileLoaded(true);
-      setProfileSetupRequired(true);
       return;
     }
     const client = supabase;
@@ -7938,9 +7963,13 @@ function StudentDashboard({
         setAcademicYear(yr);
         setLocation(cty);
         setInterests(selectedInterests);
-        const complete = Boolean(name.trim() && inst.trim() && crs.trim() && yr.trim() && selectedInterests.length);
-        const hasDismissedSetup = sessionStorage.getItem(`techcircuit_setup_dismissed_${currentStudent.id}`) === "true";
-        setProfileSetupRequired(!complete && !hasDismissedSetup);
+        const intendedName =
+          sessionStorage.getItem("techcircuit_intended_name") ||
+          localStorage.getItem("techcircuit_intended_name") ||
+          "";
+        if (intendedName && !name) {
+          name = intendedName;
+        }
       } catch (err: any) {
         console.warn("Could not load student profile:", err);
       } finally {
@@ -8023,7 +8052,6 @@ function StudentDashboard({
     setCourse(sanitizedCourse);
     setProfileSaving(false);
     setMessage("Your student profile was saved successfully! ✨");
-    setProfileSetupRequired(false);
     setSection("overview");
   }
 
@@ -8049,74 +8077,31 @@ function StudentDashboard({
     );
   }
 
-  if (section !== "orders" && (!profileLoaded || profileLoading)) {
+  if (section !== "orders" && !profileLoaded && profileLoading) {
     return (
-      <main className="dashboard-page">
-        <section className="dashboard-hero">
-          <div><div className="eyebrow"><span className="eyebrow-line" /> STUDENT PROFILE SETUP</div><h1>One quick step <em>before you begin.</em></h1><p>We’ll prepare your student space once your profile is ready.</p></div>
-          <button className="button button-outline button-small" onClick={signOut}><LogOut size={14} /> Sign out</button>
-        </section>
-        <section className="dashboard-content">
-          <div className="empty-state dashboard-menu-empty">
-            <div className="empty-icon"><Clock3 size={23} /></div>
-            <span className="eyebrow"><span className="eyebrow-line" /> PREPARING STUDENT DASHBOARD</span>
-            <h3>Checking your student details…</h3>
-            <p>Your student area will open shortly.</p>
-          </div>
+      <main className="dashboard-page dashboard-page-modern">
+        <section className="dashboard-content dashboard-content-modern" style={{ textAlign: "center", padding: "80px 20px" }}>
+          <div className="empty-icon" style={{ margin: "0 auto 16px" }}><Clock3 size={32} /></div>
+          <h3 style={{ fontSize: "20px", fontWeight: 700, margin: "0 0 8px" }}>Opening your student dashboard…</h3>
+          <p style={{ color: "#64748B", fontSize: "14px", margin: 0 }}>Setting up your engineering workspace.</p>
         </section>
       </main>
     );
   }
 
   const profileSection = (
-    <section
-      className={`student-profile-section${profileSetupRequired ? " student-setup-modal" : ""}`}
-      role={profileSetupRequired ? "dialog" : undefined}
-      aria-modal={profileSetupRequired ? true : undefined}
-      aria-labelledby={profileSetupRequired ? "student-setup-title" : undefined}
-    >
-      {profileSetupRequired && (
-        <button
-          className="modal-close"
-          type="button"
-          onClick={() => {
-            if (student?.id) sessionStorage.setItem(`techcircuit_setup_dismissed_${student.id}`, "true");
-            setProfileSetupRequired(false);
-            setSection("overview");
-          }}
-          aria-label="Close setup modal"
-        >
-          <X size={19} />
-        </button>
-      )}
+    <section className="student-profile-section">
       <div className="dashboard-section-head">
         <div>
-          <div className="eyebrow"><span className="eyebrow-line" /> {profileSetupRequired ? "STUDENT DETAILS" : "YOUR PROFILE"}</div>
-          <h2 id={profileSetupRequired ? "student-setup-title" : undefined}>{profileSetupRequired ? "Set up your student profile" : "Student Profile"}</h2>
-          {profileSetupRequired && <p className="profile-setup-intro">Tell us about your studies and choose the engineering areas you want to explore.</p>}
+          <div className="eyebrow"><span className="eyebrow-line" /> YOUR PROFILE</div>
+          <h2>Student Profile</h2>
+          <p className="profile-setup-intro">Tell us about your studies and choose the engineering areas you want to explore.</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           <span className="profile-private-note"><ShieldCheck size={14} /> Private to your account</span>
-          {profileSetupRequired && (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <button
-                className="button button-outline button-small"
-                type="button"
-                onClick={() => {
-                  if (student?.id) sessionStorage.setItem(`techcircuit_setup_dismissed_${student.id}`, "true");
-                  setProfileSetupRequired(false);
-                  setSection("overview");
-                }}
-                title="Explore dashboard now"
-                style={{ padding: "4px 10px", fontSize: "12px", minHeight: "30px" }}
-              >
-                Explore Dashboard <ArrowRight size={13} />
-              </button>
-              <button className="button button-outline button-small" type="button" onClick={signOut} title="Sign out of student account" style={{ padding: "4px 10px", fontSize: "12px", minHeight: "30px" }}>
-                <LogOut size={13} /> Sign out
-              </button>
-            </div>
-          )}
+          <button className="button button-outline button-small" type="button" onClick={signOut} title="Sign out of student account" style={{ padding: "4px 10px", fontSize: "12px", minHeight: "30px" }}>
+            <LogOut size={13} /> Sign out
+          </button>
         </div>
       </div>
 
@@ -8199,18 +8184,99 @@ function StudentDashboard({
           {message && <p className="auth-success profile-status" role="status">{message}</p>}
           <button className="button button-primary profile-save-btn" type="submit" disabled={profileLoading || profileSaving}>
             <Check size={16} strokeWidth={2.4} />
-            <span>{profileSaving ? "Saving details…" : profileSetupRequired ? "Save details and continue" : "Save Profile Changes"}</span>
+            <span>{profileSaving ? "Saving details…" : "Save Profile Changes"}</span>
           </button>
         </div>
       </form>
     </section>
   );
 
+  const isProfileComplete = Boolean(
+    profileName.trim() && institution.trim() && sanitizeCourse(course).trim() && academicYear && interests.length
+  );
+
   return (
     <main className="dashboard-page dashboard-page-modern">
       <section className="dashboard-content dashboard-content-modern">
-        {section === "overview" && !profileSetupRequired && (
+        {/* Navigation Tabs */}
+        <div className="student-dashboard-tabs" style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "16px", marginBottom: "20px", borderBottom: "1px solid #E2E8F0" }}>
+          {[
+            { id: "overview", label: "Overview", icon: GraduationCap },
+            { id: "orders", label: "Hardware Orders", icon: PackageCheck, count: studentOrders.length },
+            { id: "applications", label: "Opportunities", icon: FileText },
+            { id: "profile", label: "My Profile", icon: UserRound },
+            { id: "settings", label: "Settings", icon: Settings },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = section === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setSection(tab.id as any)}
+                className={`button button-small ${isActive ? "button-primary" : "button-outline"}`}
+                style={{
+                  borderRadius: "999px",
+                  padding: "6px 14px",
+                  fontWeight: isActive ? 700 : 500,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                <Icon size={14} />
+                <span>{tab.label}</span>
+                {typeof tab.count === "number" && tab.count > 0 && (
+                  <span style={{ background: isActive ? "rgba(255,255,255,0.3)" : "#E2E8F0", padding: "1px 6px", borderRadius: "999px", fontSize: "11px" }}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {section === "overview" && (
           <>
+            {!isProfileComplete && (
+              <div className="dashboard-welcome-banner" style={{
+                background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
+                borderRadius: "16px",
+                padding: "24px 28px",
+                marginBottom: "24px",
+                color: "#FFFFFF",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "20px",
+                flexWrap: "wrap",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                boxShadow: "0 10px 25px -5px rgba(15, 23, 42, 0.3)"
+              }}>
+                <div style={{ maxWidth: "560px" }}>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: "#38BDF8", marginBottom: "8px" }}>
+                    <Sparkles size={14} /> Student Account Activated
+                  </div>
+                  <h2 style={{ fontSize: "20px", fontWeight: 700, margin: "0 0 6px", color: "#F8FAFC" }}>
+                    Welcome, {profileName.trim() || student?.email?.split("@")[0] || "Student"}! 🎓
+                  </h2>
+                  <p style={{ margin: 0, fontSize: "14px", color: "#94A3B8", lineHeight: 1.5 }}>
+                    Your student workspace is ready. Complete your college and branch details anytime to receive verified engineering opportunities and project kits tailored to your semester.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                  <button
+                    className="button button-primary"
+                    type="button"
+                    onClick={() => setSection("profile")}
+                    style={{ whiteSpace: "nowrap" }}
+                  >
+                    Complete Profile <ArrowRight size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
             {/* Quick Metrics Cards */}
             <div className="dashboard-stats-grid">
               <div className="dashboard-stat-card card-glow-orange" onClick={() => setSection("orders")} role="button" tabIndex={0}>
@@ -8613,7 +8679,7 @@ function StudentDashboard({
           </section>
         )}
 
-        {section === "applications" && !profileSetupRequired && (
+        {section === "applications" && (
           <section className="opportunity-activity-section">
             <div className="dashboard-section-head">
               <div>
@@ -8703,7 +8769,7 @@ function StudentDashboard({
             )}
           </section>
         )}
-        {section === "notifications" && !profileSetupRequired && (
+        {section === "notifications" && (
           <div className="empty-state dashboard-menu-empty">
             <div className="empty-icon"><Bell size={23} /></div>
             <span className="eyebrow"><span className="eyebrow-line" /> UPDATES</span>
@@ -8714,7 +8780,7 @@ function StudentDashboard({
             </div>
           </div>
         )}
-        {section === "settings" && !profileSetupRequired && (
+        {section === "settings" && (
           <div className="dashboard-settings-grid">
             <article className="dashboard-settings-card">
               <span className="dashboard-metric-icon"><Settings size={18} /></span>
@@ -8737,21 +8803,7 @@ function StudentDashboard({
             </article>
           </div>
         )}
-        {profileSetupRequired ? (
-          <div
-            className="modal-overlay student-setup-overlay"
-            role="presentation"
-            onClick={(event) => {
-              if (event.target === event.currentTarget) {
-                if (student?.id) sessionStorage.setItem(`techcircuit_setup_dismissed_${student.id}`, "true");
-                setProfileSetupRequired(false);
-                setSection("overview");
-              }
-            }}
-          >
-            {profileSection}
-          </div>
-        ) : section === "profile" ? profileSection : null}
+        {section === "profile" && profileSection}
       </section>
     </main>
   );
