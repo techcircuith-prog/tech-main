@@ -1202,7 +1202,7 @@ function App() {
   const [dataError, setDataError] = useState("");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<"admin" | "student" | null>(null);
-  const student = userRole === "student" ? currentUser : null;
+  const student = currentUser && userRole !== "admin" ? currentUser : null;
   const [authOpen, setAuthOpen] = useState(() => ["/login", "/signin", "/student-login", "/auth"].includes(window.location.pathname.replace(/\/+$/, "")));
   const [authRecovery, setAuthRecovery] = useState(false);
   const [pendingOpportunityPrompt, setPendingOpportunityPrompt] = useState<Listing | null>(null);
@@ -1261,6 +1261,7 @@ function App() {
       return null;
     }
     setCurrentUser(user);
+    setUserRole((prev) => prev || "student");
 
     // Extract preferred display name from Google OAuth metadata or email
     const metaName =
@@ -1511,12 +1512,14 @@ function App() {
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const isRecoveryCallback = searchParams.get("type") === "recovery" || hashParams.get("type") === "recovery";
     const hasCode = searchParams.has("code") || hashParams.has("access_token");
-    let isOAuthCallback = !isRecoveryCallback && (hasCode || sessionStorage.getItem("techcircuit_oauth_in_progress") === "true");
+    const wasOAuth = sessionStorage.getItem("techcircuit_oauth_in_progress") === "true" || localStorage.getItem("techcircuit_oauth_in_progress") === "true";
+    let isOAuthCallback = !isRecoveryCallback && (hasCode || wasOAuth);
 
     // Catch any OAuth redirect errors from Google / Supabase
     const oauthError = searchParams.get("error_description") || searchParams.get("error") || hashParams.get("error_description") || hashParams.get("error");
     if (oauthError) {
       sessionStorage.removeItem("techcircuit_oauth_in_progress");
+      localStorage.removeItem("techcircuit_oauth_in_progress");
       const cleanUrl = ["/login", "/signin", "/student-login", "/auth"].includes(window.location.pathname.replace(/\/+$/, ""))
         ? "/"
         : window.location.pathname;
@@ -1524,36 +1527,43 @@ function App() {
       showToast(`Google sign-in was not completed: ${oauthError}`, "error");
     }
 
-    function processSession(user: User, isOAuth: boolean) {
-      void resolveUserRole(client, user).then((role) => {
-        if (isRecoveryCallback) {
-          setAuthRecovery(true);
-          setAuthOpen(true);
-        } else if (isOAuth) {
-          sessionStorage.removeItem("techcircuit_oauth_in_progress");
-          setAuthOpen(false);
+    async function handleAuthenticatedUser(user: User, fromOAuth: boolean) {
+      setCurrentUser(user);
+      setUserRole((prev) => prev || "student");
+      setAuthOpen(false);
 
-          // Clean query/hash parameters from URL
-          const currentPath = window.location.pathname.replace(/\/+$/, "");
-          const cleanPath = ["/login", "/signin", "/student-login", "/auth"].includes(currentPath)
-            ? "/"
-            : (window.location.pathname || "/");
-          window.history.replaceState({}, document.title, cleanPath);
+      if (fromOAuth) {
+        sessionStorage.removeItem("techcircuit_oauth_in_progress");
+        localStorage.removeItem("techcircuit_oauth_in_progress");
+      }
 
-          const displayName =
-            (user.user_metadata?.full_name as string | undefined)?.trim() ||
-            (user.user_metadata?.name as string | undefined)?.trim() ||
-            (user.user_metadata?.user_name as string | undefined)?.trim() ||
-            (user.user_metadata?.given_name as string | undefined)?.trim() ||
-            (user.email ? user.email.split("@")[0] : "Student");
-          showToast(`Welcome back, ${displayName}! Signed in with Google.`, "success");
+      const currentPath = window.location.pathname.replace(/\/+$/, "");
+      if (hasCode || ["/login", "/signin", "/student-login", "/auth"].includes(currentPath)) {
+        const cleanPath = ["/login", "/signin", "/student-login", "/auth"].includes(currentPath)
+          ? "/"
+          : (window.location.pathname || "/");
+        window.history.replaceState({}, document.title, cleanPath);
+      }
 
-          if (role === "student" && page !== "Checkout" && page !== "Cart" && page !== "PaymentResult") {
-            setPage("Dashboard");
-            setStudentSection("overview");
-          }
+      const role = await resolveUserRole(client, user);
+
+      if (isRecoveryCallback) {
+        setAuthRecovery(true);
+        setAuthOpen(true);
+      } else if (fromOAuth) {
+        const displayName =
+          (user.user_metadata?.full_name as string | undefined)?.trim() ||
+          (user.user_metadata?.name as string | undefined)?.trim() ||
+          (user.user_metadata?.user_name as string | undefined)?.trim() ||
+          (user.user_metadata?.given_name as string | undefined)?.trim() ||
+          (user.email ? user.email.split("@")[0] : "Student");
+        showToast(`Welcome back, ${displayName}! Signed in with Google.`, "success");
+
+        if (role === "student" && page !== "Checkout" && page !== "Cart" && page !== "PaymentResult") {
+          setPage("Dashboard");
+          setStudentSection("overview");
         }
-      });
+      }
     }
 
     void client.auth.getSession().then(({ data, error }) => {
@@ -1562,21 +1572,21 @@ function App() {
         return;
       }
       if (data.session?.user) {
-        processSession(data.session.user, isOAuthCallback);
-      } else if (!hasCode) {
-        // Do not clear state if PKCE code exchange is currently taking place
+        void handleAuthenticatedUser(data.session.user, isOAuthCallback);
+      } else if (!hasCode && !wasOAuth) {
         setCurrentUser(null);
         setUserRole(null);
       }
     }).catch(() => setDataError("Could not restore your session."));
 
-    const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
+    const { data: authListener } = client.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
-        const isOAuth = isOAuthCallback || (event === "SIGNED_IN" && (hasCode || sessionStorage.getItem("techcircuit_oauth_in_progress") === "true"));
-        processSession(session.user, isOAuth);
-        if (isOAuth) isOAuthCallback = false;
-      } else {
-        void resolveUserRole(client, null);
+        const justSignedIn = event === "SIGNED_IN" || isOAuthCallback || hasCode || wasOAuth;
+        await handleAuthenticatedUser(session.user, justSignedIn);
+        isOAuthCallback = false;
+      } else if (event === "SIGNED_OUT") {
+        setCurrentUser(null);
+        setUserRole(null);
       }
       if (event === "PASSWORD_RECOVERY") {
         setAuthRecovery(true);
@@ -2083,7 +2093,14 @@ function App() {
                 aria-haspopup="menu"
               >
                 <span className="student-avatar">{userRole === "admin" ? <ShieldCheck size={11} /> : <UserRound size={11} />}</span>
-                <span className="student-profile-label">{userRole === "admin" ? "Admin" : ""}</span>
+                <span className="student-profile-label">
+                  {userRole === "admin"
+                    ? "Admin"
+                    : ((currentUser.user_metadata?.full_name as string | undefined)?.trim() ||
+                       (currentUser.user_metadata?.name as string | undefined)?.trim() ||
+                       currentUser.email?.split("@")[0] ||
+                       "Student")}
+                </span>
                 <ChevronDown size={8} />
               </button>
               {studentMenuOpen && (
@@ -7239,6 +7256,7 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
     try {
       try {
         sessionStorage.setItem("techcircuit_oauth_in_progress", "true");
+        localStorage.setItem("techcircuit_oauth_in_progress", "true");
       } catch {}
 
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
@@ -7253,11 +7271,13 @@ function StudentAuthModal({ isPasswordRecovery, onClose, onAuthenticated }: { is
       });
       if (oauthError) {
         sessionStorage.removeItem("techcircuit_oauth_in_progress");
+        localStorage.removeItem("techcircuit_oauth_in_progress");
         setError(`Could not continue with Google: ${oauthError.message}`);
         setBusy(false);
       }
     } catch (e: any) {
       sessionStorage.removeItem("techcircuit_oauth_in_progress");
+      localStorage.removeItem("techcircuit_oauth_in_progress");
       setError(e?.message || "Could not connect to Google sign-in. Please try again.");
       setBusy(false);
     }
@@ -7587,10 +7607,8 @@ function StudentDashboard({
   const [profileLoading, setProfileLoading] = useState(Boolean(student));
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [profileSetupRequired, setProfileSetupRequired] = useState(false);
-  const [profileLoadAttempt, setProfileLoadAttempt] = useState(0);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
-  const [profileLoadError, setProfileLoadError] = useState("");
   const [profileName, setProfileName] = useState(student?.user_metadata.name ?? "");
   const [institution, setInstitution] = useState("");
   const [course, setCourse] = useState("");
@@ -7863,7 +7881,6 @@ function StudentDashboard({
     const currentStudent = student;
     const supabase = getSupabase();
     if (!supabase) {
-      setProfileLoadError("Student profile setup is unavailable until Supabase is configured.");
       setProfileLoading(false);
       setProfileLoaded(true);
       setProfileSetupRequired(true);
@@ -7872,7 +7889,6 @@ function StudentDashboard({
     const client = supabase;
     let active = true;
     setProfileLoading(true);
-    setProfileLoadError("");
     async function loadProfile() {
       try {
         const { data, error } = await client
@@ -7882,8 +7898,7 @@ function StudentDashboard({
           .maybeSingle();
         if (!active) return;
         if (error) {
-          setProfileLoadError(`Could not load your profile: ${error.message}`);
-          return;
+          console.warn("Could not query Supabase profile, using fallback:", error.message);
         }
         const metaName =
           (currentStudent.user_metadata?.full_name as string | undefined)?.trim() ||
@@ -7924,10 +7939,10 @@ function StudentDashboard({
         setLocation(cty);
         setInterests(selectedInterests);
         const complete = Boolean(name.trim() && inst.trim() && crs.trim() && yr.trim() && selectedInterests.length);
-        setProfileSetupRequired(!complete);
-        if (!complete) setSection("profile");
-      } catch {
-        if (active) setProfileLoadError("Could not load your profile. Please try again.");
+        const hasDismissedSetup = sessionStorage.getItem(`techcircuit_setup_dismissed_${currentStudent.id}`) === "true";
+        setProfileSetupRequired(!complete && !hasDismissedSetup);
+      } catch (err: any) {
+        console.warn("Could not load student profile:", err);
       } finally {
         if (active) {
           setProfileLoading(false);
@@ -7937,18 +7952,14 @@ function StudentDashboard({
     }
     void loadProfile();
     return () => { active = false; };
-  }, [student, profileLoadAttempt, setSection]);
+  }, [student, setSection]);
 
   async function saveProfile(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!student) return;
     const sanitizedCourse = sanitizeCourse(course);
-    if (!profileName.trim() || !institution.trim() || !sanitizedCourse.trim() || !academicYear) {
-      setProfileError("Please enter your name, institution, course and academic year to continue.");
-      return;
-    }
-    if (interests.length === 0) {
-      setProfileError("Choose at least one area of interest to continue.");
+    if (!profileName.trim()) {
+      setProfileError("Please enter your name to save your profile.");
       return;
     }
     const currentStudent = student;
@@ -7964,6 +7975,7 @@ function StudentDashboard({
 
     try {
       localStorage.setItem(`techcircuit_student_profile_${currentStudent.id}`, JSON.stringify(profilePayload));
+      sessionStorage.setItem(`techcircuit_setup_dismissed_${currentStudent.id}`, "true");
     } catch {}
 
     setProfileError("");
@@ -8012,7 +8024,7 @@ function StudentDashboard({
     setProfileSaving(false);
     setMessage("Your student profile was saved successfully! ✨");
     setProfileSetupRequired(false);
-    if (profileSetupRequired) setSection("overview");
+    setSection("overview");
   }
 
   async function signOut() {
@@ -8037,7 +8049,7 @@ function StudentDashboard({
     );
   }
 
-  if (section !== "orders" && (!profileLoaded || profileLoading || profileLoadError)) {
+  if (section !== "orders" && (!profileLoaded || profileLoading)) {
     return (
       <main className="dashboard-page">
         <section className="dashboard-hero">
@@ -8046,11 +8058,10 @@ function StudentDashboard({
         </section>
         <section className="dashboard-content">
           <div className="empty-state dashboard-menu-empty">
-            <div className="empty-icon">{profileLoading ? <Clock3 size={23} /> : <CircleHelp size={23} />}</div>
-            <span className="eyebrow"><span className="eyebrow-line" /> VERIFYING STUDENT PROFILE</span>
-            <h3>{profileLoading ? "Checking your student details…" : "We couldn’t load your profile."}</h3>
-            <p>{profileLoading ? "Your student area will open after we confirm your academic details and interests." : profileLoadError || "Try again to continue."}</p>
-            {!profileLoading && <button className="button button-primary" type="button" onClick={() => setProfileLoadAttempt((attempt) => attempt + 1)}>Try again <ArrowRight size={15} /></button>}
+            <div className="empty-icon"><Clock3 size={23} /></div>
+            <span className="eyebrow"><span className="eyebrow-line" /> PREPARING STUDENT DASHBOARD</span>
+            <h3>Checking your student details…</h3>
+            <p>Your student area will open shortly.</p>
           </div>
         </section>
       </main>
@@ -8064,6 +8075,20 @@ function StudentDashboard({
       aria-modal={profileSetupRequired ? true : undefined}
       aria-labelledby={profileSetupRequired ? "student-setup-title" : undefined}
     >
+      {profileSetupRequired && (
+        <button
+          className="modal-close"
+          type="button"
+          onClick={() => {
+            if (student?.id) sessionStorage.setItem(`techcircuit_setup_dismissed_${student.id}`, "true");
+            setProfileSetupRequired(false);
+            setSection("overview");
+          }}
+          aria-label="Close setup modal"
+        >
+          <X size={19} />
+        </button>
+      )}
       <div className="dashboard-section-head">
         <div>
           <div className="eyebrow"><span className="eyebrow-line" /> {profileSetupRequired ? "STUDENT DETAILS" : "YOUR PROFILE"}</div>
@@ -8073,9 +8098,24 @@ function StudentDashboard({
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           <span className="profile-private-note"><ShieldCheck size={14} /> Private to your account</span>
           {profileSetupRequired && (
-            <button className="button button-outline button-small" type="button" onClick={signOut} title="Sign out of student account" style={{ padding: "4px 10px", fontSize: "12px", minHeight: "30px" }}>
-              <LogOut size={13} /> Sign out
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <button
+                className="button button-outline button-small"
+                type="button"
+                onClick={() => {
+                  if (student?.id) sessionStorage.setItem(`techcircuit_setup_dismissed_${student.id}`, "true");
+                  setProfileSetupRequired(false);
+                  setSection("overview");
+                }}
+                title="Explore dashboard now"
+                style={{ padding: "4px 10px", fontSize: "12px", minHeight: "30px" }}
+              >
+                Explore Dashboard <ArrowRight size={13} />
+              </button>
+              <button className="button button-outline button-small" type="button" onClick={signOut} title="Sign out of student account" style={{ padding: "4px 10px", fontSize: "12px", minHeight: "30px" }}>
+                <LogOut size={13} /> Sign out
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -8698,7 +8738,17 @@ function StudentDashboard({
           </div>
         )}
         {profileSetupRequired ? (
-          <div className="modal-overlay student-setup-overlay" role="presentation">
+          <div
+            className="modal-overlay student-setup-overlay"
+            role="presentation"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                if (student?.id) sessionStorage.setItem(`techcircuit_setup_dismissed_${student.id}`, "true");
+                setProfileSetupRequired(false);
+                setSection("overview");
+              }
+            }}
+          >
             {profileSection}
           </div>
         ) : section === "profile" ? profileSection : null}
