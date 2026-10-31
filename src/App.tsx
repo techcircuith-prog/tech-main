@@ -1303,6 +1303,7 @@ function App() {
           await client.from("profiles").insert({
             id: user.id,
             display_name: metaName,
+            email: user.email,
             role: "student",
           });
         } catch {
@@ -1315,7 +1316,7 @@ function App() {
       // If profile exists but display_name is empty (common in first-time OAuth), fill it in
       if (!data.display_name && metaName) {
         try {
-          await client.from("profiles").update({ display_name: metaName }).eq("id", user.id);
+          await client.from("profiles").update({ display_name: metaName, email: user.email }).eq("id", user.id);
         } catch {}
       }
 
@@ -8035,6 +8036,7 @@ function StudentDashboard({
               .insert({
                 id: currentStudent.id,
                 display_name: profileName.trim(),
+                email: currentStudent.email,
                 institution: institution.trim(),
                 course: sanitizedCourse.trim(),
                 academic_year: academicYear,
