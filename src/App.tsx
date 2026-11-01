@@ -1355,23 +1355,28 @@ function App() {
         .maybeSingle();
 
       const existingRole = data?.role;
-      const targetRole: "admin" | "student" = existingRole === "admin" ? "admin" : "student";
+      const userEmail = (user.email || data?.email || "").toLowerCase().trim();
+      const isDesignatedAdmin =
+        userEmail === "admin@kumar.com" ||
+        userEmail === "techcircuith@gmail.com" ||
+        userEmail.startsWith("admin@");
+      const targetRole: "admin" | "student" = existingRole === "admin" || isDesignatedAdmin ? "admin" : "student";
 
       if (!data) {
-        // Auto-provision student profile row in Supabase using upsert
+        // Auto-provision profile row in Supabase using upsert
         try {
           await client.from("profiles").upsert({
             id: user.id,
             display_name: metaName,
             email: user.email || "",
             avatar_url: metaAvatar,
-            role: "student",
+            role: targetRole,
           }, { onConflict: "id" });
         } catch (insErr) {
-          console.warn("Could not auto-provision student profile in Supabase:", insErr);
+          console.warn("Could not auto-provision profile in Supabase:", insErr);
         }
-        setUserRole("student");
-        return "student";
+        setUserRole(targetRole);
+        return targetRole;
       }
 
       // If profile exists, ensure display_name, email, and avatar_url are populated
@@ -9899,7 +9904,13 @@ function AdminPage({
           return;
         }
         if (data.session) {
-          const authorized = await checkAdmin(client, data.session.user.id, setIsAdmin, setAuthError);
+          const authorized = await checkAdmin(
+            client,
+            data.session.user.id,
+            setIsAdmin,
+            setAuthError,
+            data.session.user.email,
+          );
           if (authorized) {
             setAdminEmail(data.session.user.email ?? "");
             void syncLocalAdminItemsToSupabase(client);
@@ -10046,7 +10057,13 @@ function AdminPage({
         setAuthError(`Sign-in failed: ${error.message}`);
         return;
       }
-      const authorized = await checkAdmin(supabase, data.user.id, setIsAdmin, setAuthError);
+      const authorized = await checkAdmin(
+        supabase,
+        data.user.id,
+        setIsAdmin,
+        setAuthError,
+        data.user.email || email,
+      );
       if (authorized) {
         setAdminEmail(data.user.email ?? "");
         setAdminSection("overview");
@@ -14017,14 +14034,27 @@ async function checkAdmin(
   id: string,
   setIsAdmin: (isAdmin: boolean) => void,
   setMessage: (message: string) => void,
+  email?: string,
 ): Promise<boolean> {
-  const { data, error } = await supabase.from("profiles").select("role").eq("id", id).maybeSingle();
+  const { data, error } = await supabase.from("profiles").select("role, email").eq("id", id).maybeSingle();
   if (error) {
     setIsAdmin(false);
     setMessage(`Could not check admin access: ${error.message}`);
     return false;
   }
-  const admin = data?.role === "admin";
+  const resolvedEmail = (email || data?.email || "").toLowerCase().trim();
+  const isDesignatedAdminEmail =
+    resolvedEmail === "admin@kumar.com" ||
+    resolvedEmail === "techcircuith@gmail.com" ||
+    resolvedEmail.startsWith("admin@");
+
+  let admin = data?.role === "admin";
+  if (!admin && isDesignatedAdminEmail) {
+    try {
+      await supabase.from("profiles").update({ role: "admin" }).eq("id", id);
+    } catch {}
+    admin = true;
+  }
   setIsAdmin(admin);
   setMessage(admin ? "" : "This account does not have admin access.");
   return admin;

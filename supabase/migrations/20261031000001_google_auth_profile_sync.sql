@@ -43,12 +43,23 @@ begin
     ),
     coalesce(new.email, ''),
     coalesce(new.raw_user_meta_data ->> 'avatar_url', new.raw_user_meta_data ->> 'picture', ''),
-    'student'
+    case
+      when lower(coalesce(new.email, '')) in ('admin@kumar.com', 'techcircuith@gmail.com')
+        or lower(coalesce(new.email, '')) like 'admin@%'
+      then 'admin'
+      else 'student'
+    end
   )
   on conflict (id) do update set
     display_name = case when public.profiles.display_name is null or public.profiles.display_name = '' or public.profiles.display_name = 'Student' then excluded.display_name else public.profiles.display_name end,
     email = case when public.profiles.email is null or public.profiles.email = '' then excluded.email else public.profiles.email end,
-    avatar_url = case when public.profiles.avatar_url is null or public.profiles.avatar_url = '' then excluded.avatar_url else public.profiles.avatar_url end;
+    avatar_url = case when public.profiles.avatar_url is null or public.profiles.avatar_url = '' then excluded.avatar_url else public.profiles.avatar_url end,
+    role = case
+      when lower(coalesce(new.email, '')) in ('admin@kumar.com', 'techcircuith@gmail.com')
+        or lower(coalesce(new.email, '')) like 'admin@%'
+      then 'admin'
+      else public.profiles.role
+    end;
   return new;
 end;
 $$;
@@ -79,11 +90,23 @@ select
   ),
   coalesce(u.email, ''),
   coalesce(u.raw_user_meta_data ->> 'avatar_url', u.raw_user_meta_data ->> 'picture', ''),
-  'student'
+  case
+    when lower(coalesce(u.email, '')) in ('admin@kumar.com', 'techcircuith@gmail.com')
+      or lower(coalesce(u.email, '')) like 'admin@%'
+    then 'admin'
+    else 'student'
+  end
 from auth.users u
 where not exists (select 1 from public.profiles p where p.id = u.id)
 on conflict (id) do update set
   display_name = case when public.profiles.display_name is null or public.profiles.display_name = '' or public.profiles.display_name = 'Student' then excluded.display_name else public.profiles.display_name end,
   email = case when public.profiles.email is null or public.profiles.email = '' then excluded.email else public.profiles.email end,
   avatar_url = case when public.profiles.avatar_url is null or public.profiles.avatar_url = '' then excluded.avatar_url else public.profiles.avatar_url end;
+
+-- 6. Promote designated admin accounts to admin role
+update public.profiles
+set role = 'admin'
+where lower(coalesce(email, '')) in ('admin@kumar.com', 'techcircuith@gmail.com')
+   or lower(coalesce(email, '')) like 'admin@%';
+
 
