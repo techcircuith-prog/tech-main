@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -1249,6 +1249,7 @@ function App() {
   const [activePolicy, setActivePolicy] = useState<PolicyType | null>(null);
   const [globalToast, setGlobalToast] = useState<{ id: number; message: string; type: "success" | "info" | "error" } | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
+  const adminBackRef = useRef<(() => boolean) | null>(null);
 
   const [cookieConsent, setCookieConsent] = useState<"accepted" | "essential" | null>(() => {
     try {
@@ -1959,6 +1960,10 @@ function App() {
   }
 
   function handleGoBack() {
+    if (page === "Admin" && adminBackRef.current) {
+      const handled = adminBackRef.current();
+      if (handled) return;
+    }
     if (detailSelection) {
       closeDetails();
       return;
@@ -2078,6 +2083,7 @@ function App() {
         const elapsed = Date.now() - touchStartTime;
 
         if (deltaX > 60 && Math.abs(deltaY) < 80 && Math.abs(deltaX) > Math.abs(deltaY) * 1.3 && elapsed < 600) {
+          if (page === "Admin") return;
           const target = e.target as HTMLElement | null;
           if (target) {
             const tagName = target.tagName.toLowerCase();
@@ -2230,7 +2236,7 @@ function App() {
     document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" });
   }
 
-  if (page === "Admin") return <AdminPage onExit={handleGoBack} />;
+  if (page === "Admin") return <AdminPage onExit={handleGoBack} backHandlerRef={adminBackRef} />;
 
   return (
     <>
@@ -9053,7 +9059,13 @@ interface AdminToast {
   type: "success" | "error" | "info";
 }
 
-function AdminPage({ onExit }: { onExit: () => void }) {
+function AdminPage({
+  onExit,
+  backHandlerRef,
+}: {
+  onExit: () => void;
+  backHandlerRef?: React.MutableRefObject<(() => boolean) | null>;
+}) {
   const supabase = useMemo(() => getSupabase(), []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -9065,6 +9077,93 @@ function AdminPage({ onExit }: { onExit: () => void }) {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [toast, setToast] = useState<AdminToast | null>(null);
+
+  const adminHistoryRef = useRef<AdminSection[]>([]);
+
+  function pushAdminFormState(formName: "project" | "opportunity" | "component" | "order", id?: string) {
+    try {
+      window.history.pushState(
+        { page: "Admin", adminSection, adminForm: formName, formId: id || "", isRoot: false },
+        "",
+        window.location.href
+      );
+    } catch {}
+  }
+
+  function navigateAdminSection(nextSection: AdminSection, pushHistory = true) {
+    if (nextSection === adminSection) {
+      setMobileMenuOpen(false);
+      return;
+    }
+    if (pushHistory) {
+      adminHistoryRef.current.push(adminSection);
+      try {
+        window.history.pushState(
+          { page: "Admin", adminSection: nextSection, isRoot: false },
+          "",
+          window.location.href
+        );
+      } catch {}
+    }
+    setAdminSection(nextSection);
+    setMobileMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Ensure current admin entry has initial state
+  useEffect(() => {
+    try {
+      const st = window.history.state as { page?: string; adminSection?: AdminSection } | null;
+      if (!st || st.page !== "Admin" || !st.adminSection) {
+        window.history.replaceState(
+          { page: "Admin", adminSection: "overview", isRoot: false },
+          "",
+          window.location.href
+        );
+      }
+    } catch {}
+  }, []);
+
+  // Listen to browser / Android back button popstate inside Admin
+  useEffect(() => {
+    function handleAdminPop(event: PopStateEvent) {
+      const st = event.state as {
+        page?: string;
+        adminSection?: AdminSection;
+        adminForm?: string;
+      } | null;
+
+      // If user popped outside admin to Home, let top-level onPopState handle it
+      if (st && st.page && st.page !== "Admin") {
+        return;
+      }
+
+      setMobileMenuOpen(false);
+      setConfirmDeliveredDialogOpen(false);
+      setConfirmCancelledDialogOpen(false);
+
+      // Close open card/order forms if new state has no adminForm
+      if (!st?.adminForm) {
+        setProjFormOpen(false);
+        setEditingProjectId("");
+        setOppFormOpen(false);
+        setEditingOppId("");
+        setCompFormOpen(false);
+        setEditingProductId("");
+        setSelectedAdminOrder(null);
+      }
+
+      // Sync section
+      if (st?.adminSection) {
+        setAdminSection(st.adminSection);
+      } else {
+        setAdminSection("overview");
+      }
+    }
+
+    window.addEventListener("popstate", handleAdminPop);
+    return () => window.removeEventListener("popstate", handleAdminPop);
+  }, []);
 
   // Hardware Projects state
   const [projectRows, setProjectRows] = useState<Listing[]>([]);
@@ -9158,6 +9257,146 @@ function AdminPage({ onExit }: { onExit: () => void }) {
   const [confirmDeliveredDialogOpen, setConfirmDeliveredDialogOpen] = useState(false);
   const [confirmCancelledDialogOpen, setConfirmCancelledDialogOpen] = useState(false);
 
+  const handleAdminBack = useCallback(() => {
+    // 1. If mobile menu drawer is open, close it
+    if (mobileMenuOpen) {
+      setMobileMenuOpen(false);
+      return true;
+    }
+    // 2. If confirm dialogs are open, close them
+    if (confirmDeliveredDialogOpen) {
+      setConfirmDeliveredDialogOpen(false);
+      return true;
+    }
+    if (confirmCancelledDialogOpen) {
+      setConfirmCancelledDialogOpen(false);
+      return true;
+    }
+
+    // 3. If Project edit/create form is open, close it and return to Hardware Projects cards list!
+    if (projFormOpen) {
+      const st = window.history.state as { adminForm?: string } | null;
+      if (st?.adminForm) {
+        window.history.back();
+      } else {
+        setProjFormOpen(false);
+        setEditingProjectId("");
+      }
+      return true;
+    }
+    // 4. If Opportunity form is open, close it and return to Opportunities list!
+    if (oppFormOpen) {
+      const st = window.history.state as { adminForm?: string } | null;
+      if (st?.adminForm) {
+        window.history.back();
+      } else {
+        setOppFormOpen(false);
+        setEditingOppId("");
+      }
+      return true;
+    }
+    // 5. If Component form is open, close it and return to Components list!
+    if (compFormOpen) {
+      const st = window.history.state as { adminForm?: string } | null;
+      if (st?.adminForm) {
+        window.history.back();
+      } else {
+        setCompFormOpen(false);
+        setEditingProductId("");
+      }
+      return true;
+    }
+    // 6. If Order details modal is open, close it!
+    if (selectedAdminOrder) {
+      const st = window.history.state as { adminForm?: string } | null;
+      if (st?.adminForm) {
+        window.history.back();
+      } else {
+        setSelectedAdminOrder(null);
+      }
+      return true;
+    }
+    // 7. If inside a sub-section (e.g. Hardware Projects, Opportunities, etc.), return to Overview!
+    if (adminSection !== "overview") {
+      const st = window.history.state as { adminSection?: string } | null;
+      if (st?.adminSection && st.adminSection !== "overview") {
+        window.history.back();
+      } else {
+        const prev = adminHistoryRef.current.pop() || "overview";
+        setAdminSection(prev === adminSection ? "overview" : prev);
+      }
+      return true;
+    }
+    // 8. At root Executive Overview: return false to allow onExit()
+    return false;
+  }, [
+    mobileMenuOpen,
+    confirmDeliveredDialogOpen,
+    confirmCancelledDialogOpen,
+    projFormOpen,
+    oppFormOpen,
+    compFormOpen,
+    selectedAdminOrder,
+    adminSection,
+  ]);
+
+  // Connect back handler to parent ref
+  useEffect(() => {
+    if (backHandlerRef) {
+      backHandlerRef.current = handleAdminBack;
+      return () => {
+        backHandlerRef.current = null;
+      };
+    }
+  }, [backHandlerRef, handleAdminBack]);
+
+  // Touch Swipe Back Navigation on Mobile specifically inside Admin
+  useEffect(() => {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+
+    function handleTouchStart(e: TouchEvent) {
+      if (e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        touchStartTime = Date.now();
+      }
+    }
+
+    function handleTouchEnd(e: TouchEvent) {
+      if (e.changedTouches.length === 1) {
+        const deltaX = e.changedTouches[0].clientX - touchStartX;
+        const deltaY = e.changedTouches[0].clientY - touchStartY;
+        const elapsed = Date.now() - touchStartTime;
+
+        // Detect right-swipe (swipe back gesture): deltaX > 50px, mostly horizontal
+        if (deltaX > 50 && Math.abs(deltaY) < 80 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2 && elapsed < 600) {
+          const target = e.target as HTMLElement | null;
+          if (target) {
+            const tagName = target.tagName.toLowerCase();
+            // Don't trigger when swiping inside inputs or textareas
+            if (["input", "textarea", "select"].includes(tagName)) return;
+            if (target.closest(".carousel, [role='slider'], input[type='range']")) {
+              return;
+            }
+          }
+          const handled = handleAdminBack();
+          if (!handled && adminSection === "overview") {
+            onExit();
+          }
+        }
+      }
+    }
+
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [handleAdminBack, adminSection, onExit]);
+
   // Fetch admin orders from server (with auto-polling)
   useEffect(() => {
     if (!isAdmin) return;
@@ -9234,81 +9473,9 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     return () => clearInterval(interval);
   }, [isAdmin, ordersRevision]);
 
-  useEffect(() => {
-    let touchStartX = 0;
-    let touchStartY = 0;
-    let touchStartTime = 0;
-
-    function handleTouchStart(e: TouchEvent) {
-      if (e.touches.length === 1) {
-        touchStartX = e.touches[0].clientX;
-        touchStartY = e.touches[0].clientY;
-        touchStartTime = Date.now();
-      }
-    }
-
-    function handleTouchEnd(e: TouchEvent) {
-      if (e.changedTouches.length === 1) {
-        const deltaX = e.changedTouches[0].clientX - touchStartX;
-        const deltaY = e.changedTouches[0].clientY - touchStartY;
-        const elapsed = Date.now() - touchStartTime;
-
-        if (deltaX > 60 && Math.abs(deltaY) < 80 && Math.abs(deltaX) > Math.abs(deltaY) * 1.3 && elapsed < 600) {
-          const target = e.target as HTMLElement | null;
-          if (target && ["input", "textarea", "select"].includes(target.tagName.toLowerCase())) return;
-
-          if (confirmDeliveredDialogOpen) {
-            setConfirmDeliveredDialogOpen(false);
-            return;
-          }
-          if (confirmCancelledDialogOpen) {
-            setConfirmCancelledDialogOpen(false);
-            return;
-          }
-          if (mobileMenuOpen) {
-            setMobileMenuOpen(false);
-            return;
-          }
-          if (selectedAdminOrder) {
-            setSelectedAdminOrder(null);
-            return;
-          }
-          if (oppFormOpen) {
-            setOppFormOpen(false);
-            return;
-          }
-          if (projFormOpen) {
-            setProjFormOpen(false);
-            return;
-          }
-          if (compFormOpen) {
-            setCompFormOpen(false);
-            return;
-          }
-          onExit();
-        }
-      }
-    }
-
-    window.addEventListener("touchstart", handleTouchStart, { passive: true });
-    window.addEventListener("touchend", handleTouchEnd, { passive: true });
-    return () => {
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchend", handleTouchEnd);
-    };
-  }, [
-    confirmDeliveredDialogOpen,
-    confirmCancelledDialogOpen,
-    mobileMenuOpen,
-    selectedAdminOrder,
-    oppFormOpen,
-    projFormOpen,
-    compFormOpen,
-    onExit,
-  ]);
-
   // Open single order in detail view
   function openOrderDetail(order: AdminOrder) {
+    pushAdminFormState("order", order.id);
     setSelectedAdminOrder(order);
     setNewStage(order.tracking_status);
     setStageNote("");
@@ -9960,6 +10127,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     setOppCity("");
     setOppSummary("");
     setOppUrl("");
+    pushAdminFormState("opportunity");
     setOppFormOpen(true);
   }
 
@@ -9972,6 +10140,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     setOppCity(listing.city);
     setOppSummary(listing.summary);
     setOppUrl(listing.sourceUrl);
+    pushAdminFormState("opportunity", listing.id);
     setOppFormOpen(true);
     window.scrollTo({ top: 120, behavior: "smooth" });
   }
@@ -10042,6 +10211,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     setShowUrlInput(false);
     setImageUploading(false);
     setOfferDrafts([newComponentOfferDraft(), newComponentOfferDraft()]);
+    pushAdminFormState("component");
     setCompFormOpen(true);
   }
 
@@ -10081,6 +10251,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
       componentOfferToDraft(details.offers[0]),
       componentOfferToDraft(details.offers[1]),
     ]);
+    pushAdminFormState("component", id);
     setCompFormOpen(true);
     window.scrollTo({ top: 120, behavior: "smooth" });
   }
@@ -10370,6 +10541,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     setShowProjUrlInput(false);
     setProjImageUploading(false);
     setProjFeatured(false);
+    pushAdminFormState("project");
     setProjFormOpen(true);
   }
 
@@ -10387,6 +10559,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     setShowProjUrlInput(Boolean(project.imageUrl && (project.imageUrl.startsWith("http") || project.imageUrl.startsWith("/"))));
     setProjImageUploading(false);
     setProjFeatured(Boolean(project.featured));
+    pushAdminFormState("project", project.id);
     setProjFormOpen(true);
     window.scrollTo({ top: 120, behavior: "smooth" });
   }
@@ -10889,8 +11062,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                     key={id}
                     type="button"
                     onClick={() => {
-                      setAdminSection(id as AdminSection);
-                      setMobileMenuOpen(false);
+                      navigateAdminSection(id as AdminSection);
                     }}
                   >
                     <Icon size={18} />
@@ -10908,8 +11080,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                   className={`admin-side-link ${adminSection === "profile" ? "active" : ""}`}
                   type="button"
                   onClick={() => {
-                    setAdminSection("profile");
-                    setMobileMenuOpen(false);
+                    navigateAdminSection("profile");
                   }}
                 >
                   <UserCog size={18} />
@@ -10965,6 +11136,41 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                 >
                   {mobileMenuOpen ? <X size={16} /> : <Menu size={16} />}
                 </button>
+                {(adminSection !== "overview" || projFormOpen || oppFormOpen || compFormOpen || selectedAdminOrder) && (
+                  <button
+                    className="admin-topbar-back-btn"
+                    type="button"
+                    onClick={() => {
+                      const handled = handleAdminBack();
+                      if (!handled) onExit();
+                    }}
+                    title={
+                      projFormOpen
+                        ? "Back to Hardware Projects list"
+                        : oppFormOpen
+                        ? "Back to Opportunities list"
+                        : compFormOpen
+                        ? "Back to Components list"
+                        : selectedAdminOrder
+                        ? "Back to Orders list"
+                        : "Back to Executive Overview"
+                    }
+                    aria-label="Go back"
+                  >
+                    <ArrowLeft size={15} />
+                    <span className="admin-back-label">
+                      {projFormOpen
+                        ? "Back to Projects"
+                        : oppFormOpen
+                        ? "Back to Opportunities"
+                        : compFormOpen
+                        ? "Back to Components"
+                        : selectedAdminOrder
+                        ? "Back to Orders"
+                        : "Back to Overview"}
+                    </span>
+                  </button>
+                )}
                 <div className="admin-breadcrumbs">
                   <span className="admin-crumb-parent">Console</span>
                   <span className="admin-crumb-sep">/</span>
@@ -11069,7 +11275,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       className="admin-kpi-card"
                       role="button"
                       tabIndex={0}
-                      onClick={() => setAdminSection("projects")}
+                      onClick={() => navigateAdminSection("projects")}
                     >
                       <div className="admin-kpi-header">
                         <span className="admin-kpi-title">Hardware Projects &amp; DIY Kits</span>
@@ -11089,7 +11295,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       className="admin-kpi-card"
                       role="button"
                       tabIndex={0}
-                      onClick={() => setAdminSection("opportunities")}
+                      onClick={() => navigateAdminSection("opportunities")}
                     >
                       <div className="admin-kpi-header">
                         <span className="admin-kpi-title">Student Opportunities</span>
@@ -11109,7 +11315,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       className="admin-kpi-card"
                       role="button"
                       tabIndex={0}
-                      onClick={() => setAdminSection("components")}
+                      onClick={() => navigateAdminSection("components")}
                     >
                       <div className="admin-kpi-header">
                         <span className="admin-kpi-title">Component Catalog &amp; Offers</span>
@@ -11128,7 +11334,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       className="admin-kpi-card"
                       role="button"
                       tabIndex={0}
-                      onClick={() => setAdminSection("orders")}
+                      onClick={() => navigateAdminSection("orders")}
                     >
                       <div className="admin-kpi-header">
                         <span className="admin-kpi-title">Hardware Orders &amp; Manual Tracking</span>
@@ -11150,7 +11356,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       className="admin-kpi-card"
                       role="button"
                       tabIndex={0}
-                      onClick={() => setAdminSection("activity")}
+                      onClick={() => navigateAdminSection("activity")}
                     >
                       <div className="admin-kpi-header">
                         <span className="admin-kpi-title">Student Tracks &amp; Inquiries</span>
@@ -11169,7 +11375,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       className="admin-kpi-card"
                       role="button"
                       tabIndex={0}
-                      onClick={() => setAdminSection("profile")}
+                      onClick={() => navigateAdminSection("profile")}
                     >
                       <div className="admin-kpi-header">
                         <span className="admin-kpi-title">Security &amp; PostgreSQL RLS</span>
@@ -11328,7 +11534,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                           <button
                             type="button"
                             className="button button-outline button-small"
-                            onClick={() => setSelectedAdminOrder(null)}
+                            onClick={() => handleAdminBack()}
                             title="Back to orders list"
                           >
                             <ArrowLeft size={14} /> Back
@@ -12034,7 +12240,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                         type="button"
                         onClick={() => {
                           if (oppFormOpen && !editingOppId) {
-                            setOppFormOpen(false);
+                            handleAdminBack();
                           } else {
                             startCreateOpportunity();
                           }
@@ -12071,7 +12277,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                         <button
                           className="admin-form-close-btn"
                           type="button"
-                          onClick={() => setOppFormOpen(false)}
+                          onClick={() => handleAdminBack()}
                           aria-label="Close form"
                         >
                           <X size={18} />
@@ -12173,7 +12379,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                           <button
                             type="button"
                             className="button button-outline"
-                            onClick={() => setOppFormOpen(false)}
+                            onClick={() => handleAdminBack()}
                           >
                             Cancel
                           </button>
@@ -12360,7 +12566,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                         type="button"
                         onClick={() => {
                           if (projFormOpen && !editingProjectId) {
-                            setProjFormOpen(false);
+                            handleAdminBack();
                           } else {
                             startCreateProject();
                           }
@@ -12393,7 +12599,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                         <button
                           className="admin-form-close-btn"
                           type="button"
-                          onClick={() => setProjFormOpen(false)}
+                          onClick={() => handleAdminBack()}
                           aria-label="Close form"
                         >
                           <X size={18} />
@@ -12626,7 +12832,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                           <button
                             type="button"
                             className="button button-outline"
-                            onClick={() => setProjFormOpen(false)}
+                            onClick={() => handleAdminBack()}
                           >
                             Cancel
                           </button>
@@ -12812,7 +13018,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                         type="button"
                         onClick={() => {
                           if (compFormOpen && !editingProductId) {
-                            setCompFormOpen(false);
+                            handleAdminBack();
                           } else {
                             startCreateComponent();
                           }
@@ -12849,7 +13055,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                         <button
                           className="admin-form-close-btn"
                           type="button"
-                          onClick={() => setCompFormOpen(false)}
+                          onClick={() => handleAdminBack()}
                           aria-label="Close form"
                         >
                           <X size={18} />
@@ -13129,7 +13335,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                           <button
                             type="button"
                             className="button button-outline"
-                            onClick={() => setCompFormOpen(false)}
+                            onClick={() => handleAdminBack()}
                           >
                             Cancel
                           </button>
