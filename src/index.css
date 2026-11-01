@@ -13940,6 +13940,13 @@ select::placeholder {
     grid-template-rows: repeat(2, auto) !important;
     gap: 14px !important;
   }
+
+  .admin-projects-grid,
+  .admin-cards-grid,
+  .admin-components-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+  }
 }
 
 @media (max-width: 768px) {
@@ -14146,122 +14153,392 @@ select::placeholder {
   }
 
   /* -------------------------------------------------------------
-     SECTION 1: HARDWARE PROJECTS & DIY KITS RESPONSIVENESS
+     SECTION 1: HARDWARE PROJECTS & DIY KITS (2 COLUMN GRID)
      ------------------------------------------------------------- */
   .admin-projects-grid {
-    grid-template-columns: minmax(0, 1fr) !important;
-    gap: 14px !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
     width: 100% !important;
   }
 
   .admin-project-card {
     width: 100% !important;
     box-sizing: border-box !important;
-    border-radius: 14px !important;
+    border-radius: 12px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
   }
 
   .admin-project-img-box {
-    height: 160px !important;
+    height: 105px !important;
+  }
+
+  .admin-project-img-overlay {
+    top: 6px !important;
+    left: 6px !important;
+    right: 6px !important;
+  }
+
+  .admin-project-price-tag {
+    font-size: 10.5px !important;
+    font-weight: 800 !important;
+    padding: 2px 6px !important;
+    border-radius: 6px !important;
+  }
+
+  .admin-project-badges .badge {
+    font-size: 8.5px !important;
+    padding: 2px 4px !important;
   }
 
   .admin-project-card-body {
-    padding: 14px 14px 10px !important;
-    gap: 8px !important;
+    padding: 8px 8px 6px !important;
+    gap: 5px !important;
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
   }
 
   .admin-project-card-body h4 {
-    font-size: 15px !important;
+    font-size: 12px !important;
+    line-height: 1.3 !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    margin: 0 !important;
   }
 
   .admin-project-meta-row {
-    gap: 8px !important;
-    font-size: 11.5px !important;
+    gap: 4px !important;
+    font-size: 10px !important;
+    color: #64748b !important;
+  }
+
+  .admin-project-meta-item {
+    gap: 3px !important;
+  }
+
+  .admin-project-meta-item svg {
+    width: 11px !important;
+    height: 11px !important;
+  }
+
+  .admin-project-desc {
+    font-size: 10.5px !important;
+    line-height: 1.35 !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    margin: 0 !important;
   }
 
   .admin-project-bom-preview {
-    padding: 8px 10px !important;
+    padding: 5px 6px !important;
+    margin-top: 2px !important;
+    border-radius: 6px !important;
+  }
+
+  .admin-project-bom-title {
+    font-size: 8.5px !important;
+    margin-bottom: 3px !important;
   }
 
   .admin-project-bom-pill {
-    max-width: 140px !important;
-    font-size: 10.5px !important;
+    max-width: 75px !important;
+    font-size: 8.5px !important;
+    padding: 1px 4px !important;
+    border-radius: 4px !important;
+  }
+
+  .admin-project-bom-more {
+    font-size: 8.5px !important;
+    padding: 1px 3px !important;
   }
 
   .admin-project-card-footer {
-    padding: 10px 14px !important;
-    flex-wrap: wrap !important;
-    gap: 8px !important;
+    padding: 6px 8px !important;
+    gap: 4px !important;
+    display: flex !important;
+    align-items: center !important;
   }
 
   .admin-project-card-footer button {
-    flex: 1 1 auto !important;
+    font-size: 10px !important;
+    padding: 4px 6px !important;
+    height: 28px !important;
+  }
+
+  .admin-project-card-footer .button-outline {
+    flex: 1 !important;
     justify-content: center !important;
+    gap: 3px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .admin-project-card-footer .button-danger-ghost {
+    padding: 4px 6px !important;
+    flex-shrink: 0 !important;
   }
 
   /* -------------------------------------------------------------
-     SECTION 2: STUDENT OPPORTUNITIES RESPONSIVENESS
+     SECTION 2: STUDENT OPPORTUNITIES (2 COLUMN GRID)
      ------------------------------------------------------------- */
   .admin-cards-grid {
-    grid-template-columns: minmax(0, 1fr) !important;
-    gap: 14px !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
     width: 100% !important;
   }
 
   .admin-opportunity-card {
     width: 100% !important;
     box-sizing: border-box !important;
-    padding: 14px !important;
-    gap: 10px !important;
-    border-radius: 14px !important;
+    padding: 8px !important;
+    gap: 6px !important;
+    border-radius: 12px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
   }
 
-  .admin-card-actions {
+  .admin-card-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 4px !important;
     flex-wrap: wrap !important;
-    gap: 8px !important;
   }
 
-  .admin-card-actions button {
-    flex: 1 1 auto !important;
+  .admin-kind-pill {
+    font-size: 8.5px !important;
+    padding: 2px 5px !important;
+  }
+
+  .admin-status-badge {
+    font-size: 8.5px !important;
+    padding: 2px 5px !important;
+    gap: 2px !important;
+  }
+
+  .admin-card-body {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 3px !important;
+    flex: 1 !important;
+  }
+
+  .admin-card-body h4 {
+    font-size: 12px !important;
+    line-height: 1.3 !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+  }
+
+  .admin-card-org,
+  .admin-card-loc {
+    font-size: 10px !important;
+    gap: 3px !important;
+    color: #64748b !important;
+    display: flex !important;
+    align-items: center !important;
+  }
+
+  .admin-card-org svg,
+  .admin-card-loc svg {
+    width: 11px !important;
+    height: 11px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .admin-card-summary {
+    font-size: 10.5px !important;
+    line-height: 1.3 !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    margin: 2px 0 0 !important;
+  }
+
+  .admin-card-footer {
+    padding-top: 5px !important;
+    border-top: 1px solid #f1f5f9 !important;
+  }
+
+  .admin-footer-actions {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 3px !important;
+    width: 100% !important;
+  }
+
+  .admin-footer-actions button,
+  .admin-footer-actions a {
+    font-size: 9.5px !important;
+    padding: 3px 4px !important;
+    height: 26px !important;
     justify-content: center !important;
+    gap: 2px !important;
+    min-width: 0 !important;
   }
 
   /* -------------------------------------------------------------
-     SECTION 3: COMPONENT CATALOG & OFFERS RESPONSIVENESS
+     SECTION 3: COMPONENT CATALOG & OFFERS (2 COLUMN GRID)
      ------------------------------------------------------------- */
   .admin-components-grid {
-    grid-template-columns: minmax(0, 1fr) !important;
-    gap: 14px !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
     width: 100% !important;
   }
 
   .admin-comp-card {
     width: 100% !important;
     box-sizing: border-box !important;
-    padding: 14px !important;
-    gap: 10px !important;
-    border-radius: 14px !important;
+    padding: 8px !important;
+    gap: 6px !important;
+    border-radius: 12px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+  }
+
+  .admin-comp-top {
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 6px !important;
   }
 
   .admin-comp-thumb {
-    width: 46px !important;
-    height: 46px !important;
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    border-radius: 7px !important;
+  }
+
+  .admin-comp-main {
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .admin-comp-tags {
+    display: flex !important;
+    gap: 2px !important;
+    flex-wrap: wrap !important;
+    margin-bottom: 2px !important;
+  }
+
+  .admin-mpn-badge,
+  .admin-cat-badge {
+    font-size: 8px !important;
+    padding: 1px 3px !important;
+    border-radius: 3px !important;
+  }
+
+  .admin-comp-main h4 {
+    font-size: 11.5px !important;
+    line-height: 1.25 !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+  }
+
+  .admin-comp-mfg {
+    font-size: 9.5px !important;
+    color: #64748b !important;
+    margin: 1px 0 0 !important;
+  }
+
+  .admin-comp-summary {
+    font-size: 10px !important;
+    line-height: 1.3 !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    margin: 0 !important;
   }
 
   .admin-comp-offers-strip {
-    grid-template-columns: 1fr !important;
-    gap: 8px !important;
-    padding: 8px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 3px !important;
+    padding: 4px 6px !important;
+    border-radius: 6px !important;
+    background: #f8fafc !important;
+    border: 1px solid #f1f5f9 !important;
+  }
+
+  .admin-offer-box {
+    padding: 2px 0 !important;
+    border-bottom: 1px dashed #e2e8f0 !important;
+  }
+
+  .admin-offer-box:last-child {
+    border-bottom: none !important;
+  }
+
+  .admin-offer-box-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+  }
+
+  .admin-offer-box-header strong {
+    font-size: 9.5px !important;
+  }
+
+  .admin-offer-stock {
+    font-size: 8px !important;
+  }
+
+  .admin-offer-box-price {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+  }
+
+  .admin-offer-link {
+    font-size: 8.5px !important;
+    gap: 2px !important;
   }
 
   .admin-comp-card-footer {
-    padding-top: 10px !important;
-    flex-wrap: wrap !important;
-    gap: 8px !important;
+    padding-top: 5px !important;
+    border-top: 1px solid #f1f5f9 !important;
+    display: flex !important;
+    gap: 3px !important;
+    align-items: center !important;
   }
 
   .admin-comp-card-footer button {
-    flex: 1 1 auto !important;
+    font-size: 9.5px !important;
+    height: 26px !important;
+    padding: 3px 5px !important;
+  }
+
+  .admin-comp-card-footer .button-outline {
+    flex: 1 !important;
     justify-content: center !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    gap: 2px !important;
+  }
+
+  .admin-comp-card-footer .button-danger-ghost {
+    padding: 3px 5px !important;
+    flex-shrink: 0 !important;
   }
 
   /* -------------------------------------------------------------
