@@ -648,6 +648,21 @@ function safeImageUrl(value: unknown): string {
   return "";
 }
 
+function generateUuid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function isUuid(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
 function getLocalCustomComponents(): Listing[] {
   try {
     const raw = localStorage.getItem("techcircuit:custom_components");
@@ -684,11 +699,14 @@ function loadAdminProjectListings(): Listing[] {
   const custom = getLocalCustomProjects();
   const deleted = getDeletedProjectIds();
   const allProjects = [...custom, specialOfferProject, ...projectListings].filter((p) => !deleted.has(p.id));
-  const seen = new Set<string>();
+  const seenIds = new Set<string>();
+  const seenKeys = new Set<string>();
   const unique: Listing[] = [];
   for (const p of allProjects) {
-    if (!seen.has(p.id)) {
-      seen.add(p.id);
+    const key = p.title.trim().toLowerCase();
+    if (!seenIds.has(p.id) && !seenKeys.has(key)) {
+      seenIds.add(p.id);
+      seenKeys.add(key);
       unique.push(p);
     }
   }
@@ -1708,21 +1726,61 @@ function App() {
           return;
         }
         setRemoteListings(
-          (data ?? []).map((row) => ({
-            id: row.id,
-            kind: row.kind as Listing["kind"],
-            title: row.title,
-            organization: row.organization,
-            city: row.city,
-            summary: row.summary,
-            tags: row.tags ?? [],
-            sourceUrl: row.source_url ?? undefined,
-            verified: row.verified,
-            featured: row.featured,
-            components: row.components ?? [],
-            updated: row.updated_at,
-            componentDetails: row.kind === "Products" ? parseComponentDetails(row.details) : undefined,
-          })),
+          (data ?? []).map((row) => {
+            const rawDetails = (row.details && typeof row.details === "object" ? row.details : {}) as Record<string, any>;
+            const isProduct = row.kind === "Products";
+            const isProject = row.kind === "Projects";
+            const compDetails = isProduct ? parseComponentDetails(rawDetails) : undefined;
+
+            const projectPrice = isProject
+              ? (typeof rawDetails.projectPrice === "number"
+                  ? rawDetails.projectPrice
+                  : (Number(rawDetails.projectPrice) || undefined))
+              : undefined;
+
+            const projectCategory = isProject
+              ? (typeof rawDetails.projectCategory === "string" && rawDetails.projectCategory.trim()
+                  ? rawDetails.projectCategory.trim()
+                  : (row.tags?.[0] || row.organization || "Hardware Kit"))
+              : undefined;
+
+            const rawOffersPrice = compDetails?.offers?.[0]?.price;
+            const resolvedPrice = isProduct
+              ? (typeof rawOffersPrice === "number" ? rawOffersPrice : (typeof rawDetails.price === "number" ? rawDetails.price : undefined))
+              : projectPrice;
+
+            const imageUrl = rawDetails.imageUrl || (isProduct ? compDetails?.imageUrl : undefined) || (row.source_url && row.source_url.startsWith("http") && !row.source_url.includes("techcircuit.in") ? row.source_url : undefined);
+
+            const category = isProduct
+              ? (compDetails?.category || rawDetails.category || row.tags?.[0] || "Components")
+              : projectCategory;
+
+            const specification = isProduct
+              ? (compDetails?.mpn || rawDetails.mpn || row.summary)
+              : undefined;
+
+            return {
+              id: row.id,
+              kind: row.kind as Listing["kind"],
+              title: row.title,
+              organization: row.organization,
+              city: row.city,
+              summary: row.summary,
+              tags: row.tags ?? [],
+              sourceUrl: row.source_url ?? undefined,
+              verified: row.verified,
+              featured: row.featured,
+              components: row.components ?? [],
+              updated: row.updated_at,
+              componentDetails: compDetails,
+              projectCategory,
+              projectPrice: resolvedPrice,
+              imageUrl,
+              price: resolvedPrice,
+              category,
+              specification,
+            };
+          }),
         );
       } catch {
         setDataError("Live listings could not be loaded. Please try again later.");
@@ -1730,7 +1788,27 @@ function App() {
     }
     void loadListings();
     window.addEventListener("techcircuit:listings-updated", loadListings);
-    return () => window.removeEventListener("techcircuit:listings-updated", loadListings);
+
+    let channel: any = null;
+    try {
+      channel = client
+        .channel("public:listings-sync")
+        .on("postgres_changes", { event: "*", schema: "public", table: "listings" }, () => {
+          void loadListings();
+        })
+        .subscribe();
+    } catch {
+      // Realtime optional fallback
+    }
+
+    return () => {
+      window.removeEventListener("techcircuit:listings-updated", loadListings);
+      if (channel) {
+        try {
+          client.removeChannel(channel);
+        } catch {}
+      }
+    };
   }, []);
 
   const [listingsRevision, setListingsRevision] = useState(0);
@@ -1746,12 +1824,13 @@ function App() {
   const listings = useMemo(() => {
     const deletedProjects = getDeletedProjectIds();
     const customProjects = getLocalCustomProjects();
-    const customList = getLocalCustomComponents().filter((item) => item.kind !== "Products");
-    const filteredRemote = remoteListings.filter((item) => item.kind !== "Products" && !deletedProjects.has(item.id));
+    const customList = getLocalCustomComponents();
+    const filteredRemote = remoteListings.filter((item) => !deletedProjects.has(item.id));
     const all = [
       ...customProjects,
-      ...filteredRemote,
       ...customList,
+      ...filteredRemote,
+      specialOfferProject,
       ...(ECE_COMPONENTS_CATALOG as Listing[]),
       ...catalog.filter((c) => !deletedProjects.has(c.id)),
     ];
@@ -3324,9 +3403,12 @@ function ListingDetailPage({
 }
 
 function safeExternalUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const withProto = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   try {
-    const url = new URL(value);
-    return url.protocol === "https:" ? url.href : "";
+    const url = new URL(withProto);
+    return (url.protocol === "https:" || url.protocol === "http:") ? url.href : "";
   } catch {
     return "";
   }
@@ -3370,18 +3452,23 @@ function parseComponentDetails(value: unknown): ComponentDetails | undefined {
 }
 
 function uniqueComponentListings(listings: Listing[]): Listing[] {
-  const productsById = new Map<string, Listing>();
+  const seenIds = new Set<string>();
+  const seenKeys = new Set<string>();
+  const unique: Listing[] = [];
   for (const product of listings) {
     if (!product || product.kind !== "Products") continue;
-    if (!productsById.has(product.id)) {
-      productsById.set(product.id, product);
+    const key = `${product.title.trim().toLowerCase()}:${product.componentDetails?.mpn?.trim().toLowerCase() || ""}`;
+    if (!seenIds.has(product.id) && !seenKeys.has(key)) {
+      seenIds.add(product.id);
+      seenKeys.add(key);
+      unique.push(product);
     }
   }
-  return [...productsById.values()];
+  return unique;
 }
 
 function ComponentCatalogPage({
-  listings: _listings,
+  listings,
   cartIds,
   onAddToCart,
   onBuyNow,
@@ -3404,10 +3491,52 @@ function ComponentCatalogPage({
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 16;
 
-  // Retrieve exactly the 92 Excel sheet components
+  // Combine ECE catalog with added products (remote & local)
   const products = useMemo(() => {
-    return ECE_COMPONENTS_CATALOG as Listing[];
-  }, []);
+    const deletedProjects = getDeletedProjectIds();
+    const customComps = getLocalCustomComponents();
+    const fromListings = listings.filter((item) => item.kind === "Products" && !deletedProjects.has(item.id));
+    const all = [
+      ...customComps,
+      ...fromListings,
+      ...(ECE_COMPONENTS_CATALOG as Listing[]),
+    ];
+    const seenIds = new Set<string>();
+    const seenTitles = new Set<string>();
+    const combined: Listing[] = [];
+
+    for (const item of all) {
+      if (!item || item.kind !== "Products" || deletedProjects.has(item.id)) continue;
+      const titleKey = item.title.trim().toLowerCase();
+      if (seenIds.has(item.id) || seenTitles.has(titleKey)) continue;
+      seenIds.add(item.id);
+      seenTitles.add(titleKey);
+
+      const resolvedPrice = item.price ?? item.projectPrice ?? item.componentDetails?.offers?.[0]?.price ?? 0;
+      const resolvedCat = item.category || item.componentDetails?.category || item.tags?.[0] || "Components";
+      const resolvedSpec = item.specification || item.componentDetails?.mpn || item.summary || "";
+      const resolvedImg = item.imageUrl || item.componentDetails?.imageUrl || "";
+
+      combined.push({
+        ...item,
+        price: resolvedPrice,
+        projectPrice: resolvedPrice,
+        category: resolvedCat,
+        specification: resolvedSpec,
+        imageUrl: resolvedImg,
+      });
+    }
+    return combined;
+  }, [listings]);
+
+  const availableCategories = useMemo(() => {
+    const cats = new Set<string>(COMPONENT_CATEGORIES);
+    for (const p of products) {
+      if (p.category) cats.add(p.category);
+      if (p.componentDetails?.category) cats.add(p.componentDetails.category);
+    }
+    return Array.from(cats);
+  }, [products]);
 
   // Filtered and sorted products
   const filteredProducts = useMemo(() => {
@@ -3647,7 +3776,7 @@ function ComponentCatalogPage({
                     value={selectedCategory}
                     onChange={(e) => handleCategoryClick(e.target.value)}
                   >
-                    {COMPONENT_CATEGORIES.map((cat) => (
+                    {availableCategories.map((cat) => (
                       <option key={cat} value={cat}>
                         {cat === "All" ? "All categories" : cat}
                       </option>
@@ -9592,6 +9721,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
           const authorized = await checkAdmin(client, data.session.user.id, setIsAdmin, setAuthError);
           if (authorized) {
             setAdminEmail(data.session.user.email ?? "");
+            void syncLocalAdminItemsToSupabase(client);
           }
         }
       } catch {
@@ -9603,8 +9733,68 @@ function AdminPage({ onExit }: { onExit: () => void }) {
 
   // Load Hardware Project Listings
   useEffect(() => {
+    let active = true;
+    const client = supabase || getSupabase();
     setProjectRows(loadAdminProjectListings());
-  }, [projectRowsRefreshRevision]);
+
+    if (client) {
+      client
+        .from("listings")
+        .select("id, kind, title, organization, city, summary, tags, source_url, verified, featured, components, details, updated_at")
+        .eq("kind", "Projects")
+        .then(({ data, error }) => {
+          if (!active) return;
+          if (error) {
+            console.warn("Could not load remote projects for admin:", error);
+            return;
+          }
+          const deleted = getDeletedProjectIds();
+          const custom = getLocalCustomProjects();
+          const remote: Listing[] = (data || []).map((row) => {
+            const rawDetails = (row.details && typeof row.details === "object" ? row.details : {}) as Record<string, any>;
+            const projectPrice = typeof rawDetails.projectPrice === "number" ? rawDetails.projectPrice : (Number(rawDetails.projectPrice) || undefined);
+            const projectCategory = typeof rawDetails.projectCategory === "string" && rawDetails.projectCategory.trim()
+              ? rawDetails.projectCategory.trim()
+              : (row.tags?.[0] || row.organization || "Hardware Kit");
+            const imageUrl = rawDetails.imageUrl || (row.source_url && row.source_url.startsWith("http") && !row.source_url.includes("techcircuit.in") ? row.source_url : undefined);
+
+            return {
+              id: row.id,
+              kind: "Projects" as const,
+              title: row.title,
+              organization: row.organization,
+              city: row.city,
+              summary: row.summary,
+              tags: row.tags ?? [],
+              sourceUrl: row.source_url ?? undefined,
+              verified: row.verified,
+              featured: row.featured,
+              components: row.components ?? [],
+              updated: row.updated_at,
+              projectCategory,
+              projectPrice,
+              imageUrl,
+            };
+          });
+
+          const allProjects = [...custom, ...remote, specialOfferProject, ...projectListings].filter((p) => !deleted.has(p.id));
+          const seenIds = new Set<string>();
+          const seenKeys = new Set<string>();
+          const unique: Listing[] = [];
+          for (const p of allProjects) {
+            const key = p.title.trim().toLowerCase();
+            if (!seenIds.has(p.id) && !seenKeys.has(key)) {
+              seenIds.add(p.id);
+              seenKeys.add(key);
+              unique.push(p);
+            }
+          }
+          setProjectRows(unique);
+        });
+    }
+
+    return () => { active = false; };
+  }, [supabase, projectRowsRefreshRevision]);
 
   // Load Component Listings
   useEffect(() => {
@@ -9858,17 +10048,34 @@ function AdminPage({ onExit }: { onExit: () => void }) {
   // Start edit component
   function startEditComponent(id: string) {
     const product = productRows.find((item) => item.id === id);
-    const details = product?.componentDetails;
-    if (!product || !details) return;
+    if (!product) return;
+    const details = product.componentDetails || {
+      mpn: product.specification || product.title,
+      category: product.category || product.tags?.[0] || "Components",
+      imageUrl: product.imageUrl || "",
+      offers: [
+        {
+          seller: product.organization || "TechCircuit Lab Direct",
+          price: product.price ?? product.projectPrice ?? 0,
+          currency: "INR",
+          quantity: 1,
+          stock: 100,
+          moq: 1,
+          sellerUrl: product.sourceUrl || "https://techcircuit.in/components",
+          checkedAt: new Date().toISOString().slice(0, 10),
+        },
+      ],
+    };
 
     setEditingProductId(id);
     setCompTitle(product.title);
-    setCompOrg(product.organization);
-    setCompSummary(product.summary);
-    setCompMpn(details.mpn);
-    setCompCategory(details.category);
-    setCompImageUrl(details.imageUrl);
-    setShowUrlInput(Boolean(details.imageUrl && (details.imageUrl.startsWith("http") || details.imageUrl.startsWith("/"))));
+    setCompOrg(product.organization || "TechCircuit Lab Direct");
+    setCompSummary(product.summary || "");
+    setCompMpn(details.mpn || product.specification || product.title);
+    setCompCategory(details.category || product.category || "Components");
+    const activeImg = details.imageUrl || product.imageUrl || "";
+    setCompImageUrl(activeImg);
+    setShowUrlInput(Boolean(activeImg && (activeImg.startsWith("http") || activeImg.startsWith("/"))));
     setImageUploading(false);
     setOfferDrafts([
       componentOfferToDraft(details.offers[0]),
@@ -9954,17 +10161,23 @@ function AdminPage({ onExit }: { onExit: () => void }) {
   // Delete component
   async function deleteComponent(product: Listing) {
     if (!supabase || !isAdmin) return;
-    if (!window.confirm(`Permanently remove "${product.title}" (${product.componentDetails?.mpn}) from catalog?`)) return;
+    if (!window.confirm(`Permanently remove "${product.title}" (${product.componentDetails?.mpn || product.specification}) from catalog?`)) return;
 
     try {
-      try {
-        await supabase.from("listings").delete().eq("id", product.id);
-      } catch (dbErr) {
-        console.warn("Direct Supabase product delete note:", dbErr);
+      if (isUuid(product.id)) {
+        try {
+          await supabase.from("listings").delete().eq("id", product.id);
+        } catch (dbErr) {
+          console.warn("Direct Supabase product delete note:", dbErr);
+        }
       }
       // Also delete from local custom storage
       const customList = getLocalCustomComponents().filter((x) => x.id !== product.id && x.title !== product.title);
       localStorage.setItem("techcircuit:custom_components", JSON.stringify(customList));
+
+      const deleted = getDeletedProjectIds();
+      deleted.add(product.id);
+      localStorage.setItem("techcircuit:deleted_projects", JSON.stringify(Array.from(deleted)));
 
       setProductRows((rows) => rows.filter((r) => r.id !== product.id));
       showToast(`Removed "${product.title}" from catalog.`, "success");
@@ -9989,15 +10202,16 @@ function AdminPage({ onExit }: { onExit: () => void }) {
       const quantity = Number(offer.quantity);
       const stock = offer.stock ? Number(offer.stock) : null;
       const moq = offer.moq ? Number(offer.moq) : null;
+      const rawUrl = safeExternalUrl(offer.sellerUrl.trim());
       return {
         seller: offer.seller.trim(),
         price,
-        currency: offer.currency.trim().toUpperCase(),
-        quantity,
+        currency: (offer.currency.trim() || "INR").toUpperCase(),
+        quantity: Number.isInteger(quantity) && quantity > 0 ? quantity : 1,
         stock,
         moq,
-        sellerUrl: safeExternalUrl(offer.sellerUrl.trim()),
-        checkedAt: offer.checkedAt,
+        sellerUrl: rawUrl || "https://techcircuit.in/components",
+        checkedAt: offer.checkedAt || new Date().toISOString().slice(0, 10),
       };
     });
 
@@ -10007,10 +10221,6 @@ function AdminPage({ onExit }: { onExit: () => void }) {
         !Number.isFinite(offer.price) ||
         offer.price <= 0 ||
         !/^[A-Z]{3}$/.test(offer.currency) ||
-        !Number.isInteger(offer.quantity) ||
-        offer.quantity < 1 ||
-        (offer.stock !== null && (!Number.isInteger(offer.stock) || offer.stock < 0)) ||
-        (offer.moq !== null && (!Number.isInteger(offer.moq) || offer.moq < 1)) ||
         !offer.sellerUrl ||
         !offer.checkedAt
     );
@@ -10020,28 +10230,39 @@ function AdminPage({ onExit }: { onExit: () => void }) {
       return;
     }
 
-    const cleanImgUrl = safeImageUrl(compImageUrl.trim());
+    const cleanImgUrl = safeImageUrl(compImageUrl.trim()) || compImageUrl.trim();
     if (compImageUrl.trim() && !cleanImgUrl) {
       showToast("Please provide a valid image from gallery or a valid URL/path.", "error");
       return;
     }
 
+    const rawSellerUrl = normalizedOffers[0]?.sellerUrl?.trim() || "";
+    const validSourceUrl = /^https?:\/\//i.test(rawSellerUrl)
+      ? rawSellerUrl
+      : (cleanImgUrl && /^https?:\/\//i.test(cleanImgUrl) ? cleanImgUrl : "https://techcircuit.in/components");
+
     setCompSaving(true);
     try {
+      let targetId = editingProductId && isUuid(editingProductId) ? editingProductId : generateUuid();
+
+      const compDetails = {
+        mpn: compMpn.trim(),
+        category: compCategory.trim() || "Components",
+        imageUrl: cleanImgUrl || "",
+        price: normalizedOffers[0]?.price,
+        offers: normalizedOffers,
+      };
+
       const productValues = {
+        id: targetId,
         kind: "Products" as const,
         title: compTitle.trim(),
         organization: compOrg.trim(),
         city: "Online",
         summary: compSummary.trim(),
-        source_url: normalizedOffers[0].sellerUrl,
-        tags: compCategory.trim() ? [compCategory.trim()] : [],
-        details: {
-          mpn: compMpn.trim(),
-          category: compCategory.trim(),
-          imageUrl: cleanImgUrl,
-          offers: normalizedOffers,
-        },
+        source_url: validSourceUrl,
+        tags: compCategory.trim() ? [compCategory.trim()] : ["Components"],
+        details: compDetails,
         verification_status: "verified",
         verified: true,
         is_published: true,
@@ -10050,18 +10271,33 @@ function AdminPage({ onExit }: { onExit: () => void }) {
       };
 
       try {
-        if (editingProductId) {
-          await supabase.from("listings").update(productValues).eq("id", editingProductId);
+        if (editingProductId && isUuid(editingProductId)) {
+          const { error: updateErr } = await supabase.from("listings").update(productValues).eq("id", editingProductId);
+          if (updateErr) console.warn("Direct Supabase product update note:", updateErr);
         } else {
-          await supabase.from("listings").insert(productValues);
+          const { data: inserted, error: insertErr } = await supabase.from("listings").insert(productValues).select().single();
+          if (insertErr) {
+            console.warn("Direct Supabase product insert note:", insertErr);
+          } else if (inserted?.id) {
+            targetId = inserted.id;
+          }
         }
       } catch (dbErr) {
         console.warn("Direct Supabase product insert note:", dbErr);
       }
 
+      // If editing a non-UUID static component (e.g. ece-comp-01), hide the old static id
+      const deleted = getDeletedProjectIds();
+      if (editingProductId && editingProductId !== targetId) {
+        deleted.add(editingProductId);
+      }
+      if (deleted.has(targetId)) {
+        deleted.delete(targetId);
+      }
+      localStorage.setItem("techcircuit:deleted_projects", JSON.stringify(Array.from(deleted)));
+
       // Also persist to custom local storage
       const customList = getLocalCustomComponents();
-      const targetId = editingProductId || ("local-comp-" + Date.now());
       const customItem: Listing = {
         id: targetId,
         kind: "Products",
@@ -10069,21 +10305,23 @@ function AdminPage({ onExit }: { onExit: () => void }) {
         organization: compOrg.trim(),
         city: "Online",
         summary: compSummary.trim(),
-        tags: compCategory.trim() ? [compCategory.trim()] : [],
-        sourceUrl: normalizedOffers[0].sellerUrl,
+        tags: compCategory.trim() ? [compCategory.trim()] : ["Components"],
+        sourceUrl: validSourceUrl,
         verified: true,
         featured: false,
         updated: new Date().toISOString(),
-        componentDetails: {
-          mpn: compMpn.trim(),
-          category: compCategory.trim(),
-          imageUrl: cleanImgUrl,
-          offers: normalizedOffers,
-        },
+        category: compCategory.trim() || "Components",
+        specification: compMpn.trim(),
+        price: normalizedOffers[0]?.price,
+        projectPrice: normalizedOffers[0]?.price,
+        imageUrl: cleanImgUrl || undefined,
+        componentDetails: compDetails,
       };
 
       const updatedCustom = editingProductId
-        ? customList.map((x) => (x.id === editingProductId ? customItem : x))
+        ? customList.some((x) => x.id === editingProductId || x.id === targetId)
+          ? customList.map((x) => (x.id === editingProductId || x.id === targetId ? customItem : x))
+          : [customItem, ...customList.filter((x) => x.id !== editingProductId)]
         : [customItem, ...customList];
       localStorage.setItem("techcircuit:custom_components", JSON.stringify(updatedCustom));
 
@@ -10230,7 +10468,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
 
     try {
       const client = supabase || getSupabase();
-      if (client) {
+      if (client && isUuid(project.id)) {
         try {
           await client.from("listings").delete().eq("id", project.id);
         } catch (dbErr) {
@@ -10286,10 +10524,21 @@ function AdminPage({ onExit }: { onExit: () => void }) {
     }
 
     const cleanImgUrl = safeImageUrl(projImageUrl.trim()) || projImageUrl.trim();
+    const validSourceUrl = cleanImgUrl && /^https?:\/\//i.test(cleanImgUrl)
+      ? cleanImgUrl
+      : "https://techcircuit.in/projects";
 
     setProjSaving(true);
     try {
-      const targetId = editingProjectId || `project-custom-${Date.now()}`;
+      let targetId = editingProjectId && isUuid(editingProjectId) ? editingProjectId : generateUuid();
+
+      const projectDetails = {
+        projectPrice: parsedPrice,
+        projectCategory: projCategory.trim() || "Embedded Systems & IoT",
+        imageUrl: cleanImgUrl || "",
+        components: parsedComponents.length > 0 ? parsedComponents : ["Complete hardware kit", "Circuit board", "Tested components"],
+      };
+
       const projectItem: Listing = {
         id: targetId,
         kind: "Projects",
@@ -10319,34 +10568,52 @@ function AdminPage({ onExit }: { onExit: () => void }) {
             summary: projectItem.summary,
             tags: projectItem.tags,
             components: projectItem.components,
+            details: projectDetails,
+            source_url: validSourceUrl,
+            verification_status: "verified",
             verified: true,
             featured: projectItem.featured,
             is_published: true,
+            is_expired: false,
             updated_at: new Date().toISOString(),
           };
-          if (editingProjectId) {
-            await client.from("listings").update(payload).eq("id", editingProjectId);
+
+          if (editingProjectId && isUuid(editingProjectId)) {
+            const { error: updateErr } = await client.from("listings").update(payload).eq("id", editingProjectId);
+            if (updateErr) {
+              console.warn("Direct Supabase project update note:", updateErr);
+            }
           } else {
-            await client.from("listings").insert(payload);
+            const { data: inserted, error: insertErr } = await client.from("listings").insert(payload).select().single();
+            if (insertErr) {
+              console.warn("Direct Supabase project insert note:", insertErr);
+            } else if (inserted?.id) {
+              targetId = inserted.id;
+              projectItem.id = targetId;
+            }
           }
         } catch (dbErr) {
           console.warn("Direct Supabase project save note:", dbErr);
         }
       }
 
-      const custom = getLocalCustomProjects();
-      const updatedCustom = editingProjectId
-        ? custom.some((x) => x.id === editingProjectId)
-          ? custom.map((x) => (x.id === editingProjectId ? projectItem : x))
-          : [projectItem, ...custom]
-        : [projectItem, ...custom];
-      localStorage.setItem("techcircuit:custom_projects", JSON.stringify(updatedCustom));
-
+      // If editing a non-UUID static project (like sample-project-1), mark old ID as deleted
       const deleted = getDeletedProjectIds();
+      if (editingProjectId && editingProjectId !== targetId) {
+        deleted.add(editingProjectId);
+      }
       if (deleted.has(targetId)) {
         deleted.delete(targetId);
-        localStorage.setItem("techcircuit:deleted_projects", JSON.stringify(Array.from(deleted)));
       }
+      localStorage.setItem("techcircuit:deleted_projects", JSON.stringify(Array.from(deleted)));
+
+      const custom = getLocalCustomProjects();
+      const updatedCustom = editingProjectId
+        ? custom.some((x) => x.id === editingProjectId || x.id === targetId)
+          ? custom.map((x) => (x.id === editingProjectId || x.id === targetId ? projectItem : x))
+          : [projectItem, ...custom.filter((x) => x.id !== editingProjectId)]
+        : [projectItem, ...custom];
+      localStorage.setItem("techcircuit:custom_projects", JSON.stringify(updatedCustom));
 
       setProjFormOpen(false);
       setEditingProjectId("");
@@ -13288,8 +13555,181 @@ function componentOfferToDraft(offer?: ComponentOffer): ComponentOfferDraft {
   };
 }
 
-async function loadAdminComponentListings(_client: SupabaseClient): Promise<Listing[]> {
-  const combined = [...(ECE_COMPONENTS_CATALOG as Listing[])];
+async function syncLocalAdminItemsToSupabase(client: SupabaseClient) {
+  try {
+    const customProjects = getLocalCustomProjects();
+    const deleted = getDeletedProjectIds();
+    let projectsChanged = false;
+
+    for (let i = 0; i < customProjects.length; i++) {
+      const p = customProjects[i];
+      if (deleted.has(p.id)) continue;
+      const needsId = !isUuid(p.id);
+      const targetId = needsId ? generateUuid() : p.id;
+      const cleanImgUrl = safeImageUrl(p.imageUrl || "") || (p.imageUrl || "");
+      const validSourceUrl = cleanImgUrl && /^https?:\/\//i.test(cleanImgUrl)
+        ? cleanImgUrl
+        : "https://techcircuit.in/projects";
+
+      const payload = {
+        id: targetId,
+        kind: "Projects",
+        title: p.title,
+        organization: p.organization || "TechCircuit Hardware Kit",
+        city: p.city || "Ready to ship · All India",
+        summary: p.summary,
+        tags: p.tags?.length ? p.tags : [p.projectCategory || "Hardware Kit"],
+        components: p.components?.length ? p.components : ["Complete hardware kit"],
+        details: {
+          projectPrice: p.projectPrice,
+          projectCategory: p.projectCategory || "Embedded Systems & IoT",
+          imageUrl: cleanImgUrl || "",
+          components: p.components || [],
+        },
+        source_url: validSourceUrl,
+        verification_status: "verified",
+        verified: true,
+        featured: Boolean(p.featured),
+        is_published: true,
+        is_expired: false,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await client.from("listings").upsert(payload, { onConflict: "id" });
+      if (!error) {
+        if (needsId) {
+          deleted.add(p.id);
+          customProjects[i] = { ...p, id: targetId };
+          projectsChanged = true;
+        }
+      }
+    }
+
+    if (projectsChanged) {
+      localStorage.setItem("techcircuit:custom_projects", JSON.stringify(customProjects));
+      localStorage.setItem("techcircuit:deleted_projects", JSON.stringify(Array.from(deleted)));
+    }
+
+    const customComps = getLocalCustomComponents();
+    let compsChanged = false;
+
+    for (let i = 0; i < customComps.length; i++) {
+      const c = customComps[i];
+      if (deleted.has(c.id)) continue;
+      const needsId = !isUuid(c.id);
+      const targetId = needsId ? generateUuid() : c.id;
+      const cleanImgUrl = safeImageUrl(c.imageUrl || c.componentDetails?.imageUrl || "") || "";
+      const rawSellerUrl = c.componentDetails?.offers?.[0]?.sellerUrl || c.sourceUrl || "";
+      const validSourceUrl = /^https?:\/\//i.test(rawSellerUrl)
+        ? rawSellerUrl
+        : (cleanImgUrl && /^https?:\/\//i.test(cleanImgUrl) ? cleanImgUrl : "https://techcircuit.in/components");
+
+      const compDetails = c.componentDetails || {
+        mpn: c.specification || c.title,
+        category: c.category || "Components",
+        imageUrl: cleanImgUrl,
+        offers: [
+          {
+            seller: "TechCircuit Lab Direct",
+            price: c.price ?? c.projectPrice ?? 0,
+            currency: "INR",
+            quantity: 1,
+            stock: 100,
+            moq: 1,
+            sellerUrl: validSourceUrl,
+            checkedAt: new Date().toISOString().slice(0, 10),
+          },
+        ],
+      };
+
+      const payload = {
+        id: targetId,
+        kind: "Products",
+        title: c.title,
+        organization: c.organization || "TechCircuit Lab Direct",
+        city: c.city || "Online",
+        summary: c.summary,
+        tags: c.tags?.length ? c.tags : [c.category || "Components"],
+        details: compDetails,
+        source_url: validSourceUrl,
+        verification_status: "verified",
+        verified: true,
+        is_published: true,
+        is_expired: false,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await client.from("listings").upsert(payload, { onConflict: "id" });
+      if (!error) {
+        if (needsId) {
+          deleted.add(c.id);
+          customComps[i] = { ...c, id: targetId };
+          compsChanged = true;
+        }
+      }
+    }
+
+    if (compsChanged) {
+      localStorage.setItem("techcircuit:custom_components", JSON.stringify(customComps));
+      localStorage.setItem("techcircuit:deleted_projects", JSON.stringify(Array.from(deleted)));
+    }
+
+    if (projectsChanged || compsChanged) {
+      window.dispatchEvent(new Event("techcircuit:listings-updated"));
+    }
+  } catch (err) {
+    console.warn("Sync local admin items note:", err);
+  }
+}
+
+async function loadAdminComponentListings(client: SupabaseClient): Promise<Listing[]> {
+  const deletedProjects = getDeletedProjectIds();
+  const custom = getLocalCustomComponents();
+
+  let remote: Listing[] = [];
+  try {
+    const { data, error } = await client
+      .from("listings")
+      .select("id, kind, title, organization, city, summary, tags, source_url, verified, featured, components, details, updated_at")
+      .eq("kind", "Products");
+    if (!error && data) {
+      remote = data.map((row) => {
+        const rawDetails = (row.details && typeof row.details === "object" ? row.details : {}) as Record<string, any>;
+        const compDetails = parseComponentDetails(rawDetails);
+        const rawOffersPrice = compDetails?.offers?.[0]?.price;
+        const resolvedPrice = typeof rawOffersPrice === "number" ? rawOffersPrice : (typeof rawDetails.price === "number" ? rawDetails.price : undefined);
+        return {
+          id: row.id,
+          kind: "Products" as const,
+          title: row.title,
+          organization: row.organization,
+          city: row.city,
+          summary: row.summary,
+          tags: row.tags ?? [],
+          sourceUrl: row.source_url ?? undefined,
+          verified: row.verified,
+          featured: row.featured,
+          components: row.components ?? [],
+          updated: row.updated_at,
+          componentDetails: compDetails,
+          price: resolvedPrice,
+          projectPrice: resolvedPrice,
+          category: compDetails?.category || rawDetails.category || row.tags?.[0] || "Components",
+          specification: compDetails?.mpn || rawDetails.mpn || row.summary,
+          imageUrl: compDetails?.imageUrl || rawDetails.imageUrl,
+        };
+      });
+    }
+  } catch (err) {
+    console.warn("Could not fetch remote products for admin:", err);
+  }
+
+  const combined = [
+    ...custom,
+    ...remote,
+    ...(ECE_COMPONENTS_CATALOG as Listing[]),
+  ].filter((p) => !deletedProjects.has(p.id));
+
   return uniqueComponentListings(combined);
 }
 
