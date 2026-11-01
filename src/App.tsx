@@ -11062,8 +11062,9 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                     </div>
                   </div>
 
-                  {/* 5 Interactive KPI Metric Cards */}
-                  <div className="admin-kpi-grid">
+                  {/* 4 Primary Executive Modules (2 Column x 2 Row on Mobile) */}
+                  <div className="admin-kpi-grid admin-modules-2x2">
+                    {/* 1. Hardware Projects & DIY Kits */}
                     <div
                       className="admin-kpi-card"
                       role="button"
@@ -11071,7 +11072,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       onClick={() => setAdminSection("projects")}
                     >
                       <div className="admin-kpi-header">
-                        <span className="admin-kpi-title">HARDWARE PROJECTS</span>
+                        <span className="admin-kpi-title">Hardware Projects &amp; DIY Kits</span>
                         <div className="admin-kpi-icon icon-cyan">
                           <CircuitBoard size={20} />
                         </div>
@@ -11083,25 +11084,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       </div>
                     </div>
 
-                    <div
-                      className="admin-kpi-card"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setAdminSection("orders")}
-                    >
-                      <div className="admin-kpi-header">
-                        <span className="admin-kpi-title">HARDWARE ORDERS</span>
-                        <div className="admin-kpi-icon" style={{ background: "#FFE6D5", color: "#F97316" }}>
-                          <PackageCheck size={20} />
-                        </div>
-                      </div>
-                      <div className="admin-kpi-metric">{adminOrders.length}</div>
-                      <div className="admin-kpi-sub">
-                        <span className="badge badge-success">{newOrdersCount} New</span>
-                        <span className="badge" style={{ background: "#FEF3C7", color: "#B45309" }}>{inBuildOrdersCount} In Build</span>
-                      </div>
-                    </div>
-
+                    {/* 2. Student Opportunities */}
                     <div
                       className="admin-kpi-card"
                       role="button"
@@ -11109,7 +11092,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       onClick={() => setAdminSection("opportunities")}
                     >
                       <div className="admin-kpi-header">
-                        <span className="admin-kpi-title">OPPORTUNITIES</span>
+                        <span className="admin-kpi-title">Student Opportunities</span>
                         <div className="admin-kpi-icon icon-cyan">
                           <BriefcaseBusiness size={20} />
                         </div>
@@ -11121,6 +11104,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       </div>
                     </div>
 
+                    {/* 3. Component Catalog & Offers */}
                     <div
                       className="admin-kpi-card"
                       role="button"
@@ -11128,7 +11112,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       onClick={() => setAdminSection("components")}
                     >
                       <div className="admin-kpi-header">
-                        <span className="admin-kpi-title">COMPONENTS</span>
+                        <span className="admin-kpi-title">Component Catalog &amp; Offers</span>
                         <div className="admin-kpi-icon icon-violet">
                           <Cpu size={20} />
                         </div>
@@ -11139,6 +11123,29 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       </div>
                     </div>
 
+                    {/* 4. Hardware Orders & Manual Tracking */}
+                    <div
+                      className="admin-kpi-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setAdminSection("orders")}
+                    >
+                      <div className="admin-kpi-header">
+                        <span className="admin-kpi-title">Hardware Orders &amp; Manual Tracking</span>
+                        <div className="admin-kpi-icon" style={{ background: "#FFE6D5", color: "#F97316" }}>
+                          <PackageCheck size={20} />
+                        </div>
+                      </div>
+                      <div className="admin-kpi-metric">{adminOrders.length}</div>
+                      <div className="admin-kpi-sub">
+                        <span className="badge badge-success">{newOrdersCount} New</span>
+                        <span className="badge" style={{ background: "#FEF3C7", color: "#B45309" }}>{inBuildOrdersCount} In Build</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Secondary Activity & Security Metrics */}
+                  <div className="admin-kpi-grid admin-secondary-kpi-grid">
                     <div
                       className="admin-kpi-card"
                       role="button"
@@ -11146,7 +11153,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       onClick={() => setAdminSection("activity")}
                     >
                       <div className="admin-kpi-header">
-                        <span className="admin-kpi-title">STUDENT TRACKS</span>
+                        <span className="admin-kpi-title">Student Tracks &amp; Inquiries</span>
                         <div className="admin-kpi-icon icon-amber">
                           <TrendingUp size={20} />
                         </div>
@@ -11165,7 +11172,7 @@ function AdminPage({ onExit }: { onExit: () => void }) {
                       onClick={() => setAdminSection("profile")}
                     >
                       <div className="admin-kpi-header">
-                        <span className="admin-kpi-title">SECURITY & RLS</span>
+                        <span className="admin-kpi-title">Security &amp; PostgreSQL RLS</span>
                         <div className="admin-kpi-icon icon-emerald">
                           <ShieldCheck size={20} />
                         </div>
