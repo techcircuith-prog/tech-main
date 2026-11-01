@@ -1614,9 +1614,9 @@ function App() {
     async function handleAuthenticatedUser(user: User, fromOAuth: boolean) {
       if (!isSubscribed) return;
       setCurrentUser(user);
-      setUserRole((prev) => prev || "student");
       setAuthOpen(false);
 
+      const currentPath = window.location.pathname.replace(/\/+$/, "").toLowerCase();
       const targetPage =
         localStorage.getItem("techcircuit_oauth_target_page") ||
         sessionStorage.getItem("techcircuit_oauth_target_page");
@@ -1628,7 +1628,23 @@ function App() {
         localStorage.removeItem("techcircuit_oauth_target_page");
       }
 
-      const currentPath = window.location.pathname.replace(/\/+$/, "");
+      const role = await resolveUserRole(client, user);
+      if (!isSubscribed) return;
+
+      const isAdminContext = currentPath === "/admin" || page === "Admin" || targetPage === "Admin" || role === "admin";
+
+      // If user is signing in while in the Admin page or context, stay in Admin and do NOT redirect to student dashboard!
+      if (isAdminContext && (currentPath === "/admin" || page === "Admin" || targetPage === "Admin" || role === "admin")) {
+        setUserRole(role || "admin");
+        if (role === "admin") {
+          setPage("Admin");
+          window.history.replaceState({ page: "Admin", isRoot: false, hasDetail: false }, document.title, "/admin");
+          return;
+        }
+      }
+
+      setUserRole(role || "student");
+
       const isAuthPath = ["/login", "/signin", "/student-login", "/auth"].includes(currentPath);
       const isDashboardTarget = targetPage === "Dashboard" || currentPath === "/dashboard" || fromOAuth;
 
@@ -1650,13 +1666,10 @@ function App() {
         }
       }
 
-      const role = await resolveUserRole(client, user);
-      if (!isSubscribed) return;
-
       if (isRecoveryCallback) {
         setAuthRecovery(true);
         setAuthOpen(true);
-      } else if (fromOAuth || isDashboardTarget) {
+      } else if (fromOAuth) {
         const displayName =
           (user.user_metadata?.full_name as string | undefined)?.trim() ||
           (user.user_metadata?.name as string | undefined)?.trim() ||
@@ -1692,8 +1705,8 @@ function App() {
     const { data: authListener } = client.auth.onAuthStateChange(async (event, session) => {
       if (!isSubscribed) return;
       if (session?.user) {
-        const justSignedIn = event === "SIGNED_IN" || isOAuthCallback || hasCode || wasOAuth;
-        await handleAuthenticatedUser(session.user, justSignedIn);
+        const isActualOAuth = isOAuthCallback || hasCode || wasOAuth;
+        await handleAuthenticatedUser(session.user, isActualOAuth);
         isOAuthCallback = false;
       } else if (event === "SIGNED_OUT") {
         setCurrentUser(null);
@@ -2510,7 +2523,8 @@ function App() {
           setStudentSection("overview");
           setAuthRecovery(false);
           if (page !== "Checkout" && page !== "Cart" && page !== "PaymentResult") {
-            if (role === "student") navigate("Dashboard");
+            if (role === "admin") navigate("Admin");
+            else if (role === "student") navigate("Dashboard");
           }
         });
       } else {
