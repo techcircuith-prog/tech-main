@@ -1100,13 +1100,31 @@ const FALLBACK_SUPABASE_URL = "https://zomwoprlbydezbbliyui.supabase.co";
 const FALLBACK_SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvbXdvcHJsYnlkZXpiYmxpeXVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4OTQ0MTEsImV4cCI6MjEwNzQ3MDQxMX0.ZsmboSVX_kN4J79tIbZBIbdFMIOijyhfqcayAbGHlt4";
 
-let supabaseClient: SupabaseClient | null | undefined;
+const INITIAL_SUPABASE_URL = ((import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim()) || FALLBACK_SUPABASE_URL;
+const INITIAL_SUPABASE_ANON_KEY = ((import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim()) || FALLBACK_SUPABASE_ANON_KEY;
+
+let supabaseClient: SupabaseClient | null =
+  INITIAL_SUPABASE_URL && INITIAL_SUPABASE_ANON_KEY
+    ? createClient(INITIAL_SUPABASE_URL, INITIAL_SUPABASE_ANON_KEY, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+        },
+      })
+    : null;
 
 function getSupabase(): SupabaseClient | null {
-  if (supabaseClient !== undefined) return supabaseClient;
+  if (supabaseClient) return supabaseClient;
   const url = ((import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim()) || FALLBACK_SUPABASE_URL;
   const key = ((import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim()) || FALLBACK_SUPABASE_ANON_KEY;
-  supabaseClient = url && key ? createClient(url, key) : null;
+  supabaseClient = url && key ? createClient(url, key, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  }) : null;
   return supabaseClient;
 }
 
@@ -1263,13 +1281,30 @@ function App() {
     setCurrentUser(user);
     setUserRole((prev) => prev || "student");
 
-    // Extract preferred display name from Google OAuth metadata or email
+    const intendedName =
+      sessionStorage.getItem("techcircuit_intended_name") ||
+      localStorage.getItem("techcircuit_intended_name") ||
+      "";
+    if (intendedName) {
+      try {
+        sessionStorage.removeItem("techcircuit_intended_name");
+        localStorage.removeItem("techcircuit_intended_name");
+      } catch {}
+    }
+
+    // Extract preferred display name from Google OAuth metadata, intended name, or email
     const metaName =
+      intendedName.trim() ||
       (user.user_metadata?.full_name as string | undefined)?.trim() ||
       (user.user_metadata?.name as string | undefined)?.trim() ||
       (user.user_metadata?.user_name as string | undefined)?.trim() ||
       (user.user_metadata?.given_name as string | undefined)?.trim() ||
       (user.email ? user.email.split("@")[0] : "Student");
+
+    const metaAvatar =
+      (user.user_metadata?.avatar_url as string | undefined)?.trim() ||
+      (user.user_metadata?.picture as string | undefined)?.trim() ||
+      "";
 
     // Ensure local student profile cache is initialized so details are never lost
     const cacheKey = `techcircuit_student_profile_${user.id}`;
@@ -1278,52 +1313,64 @@ function App() {
       if (!existingRaw) {
         localStorage.setItem(cacheKey, JSON.stringify({
           display_name: metaName,
+          email: user.email || "",
+          avatar_url: metaAvatar,
           role: "student",
           created_at: new Date().toISOString(),
         }));
       } else {
         const parsed = JSON.parse(existingRaw);
-        if (!parsed.display_name && metaName) {
-          parsed.display_name = metaName;
-          localStorage.setItem(cacheKey, JSON.stringify(parsed));
-        }
+        let changed = false;
+        if (!parsed.display_name && metaName) { parsed.display_name = metaName; changed = true; }
+        if (!parsed.email && user.email) { parsed.email = user.email; changed = true; }
+        if (!parsed.avatar_url && metaAvatar) { parsed.avatar_url = metaAvatar; changed = true; }
+        if (changed) localStorage.setItem(cacheKey, JSON.stringify(parsed));
       }
     } catch {}
 
     try {
-      const { data, error } = await client
+      const { data } = await client
         .from("profiles")
-        .select("role, display_name")
+        .select("role, display_name, email, avatar_url")
         .eq("id", user.id)
         .maybeSingle();
 
-      if (error || !data) {
-        // Attempt to auto-provision student profile row in Supabase
+      const existingRole = data?.role;
+      const targetRole: "admin" | "student" = existingRole === "admin" ? "admin" : "student";
+
+      if (!data) {
+        // Auto-provision student profile row in Supabase using upsert
         try {
-          await client.from("profiles").insert({
+          await client.from("profiles").upsert({
             id: user.id,
             display_name: metaName,
-            email: user.email,
+            email: user.email || "",
+            avatar_url: metaAvatar,
             role: "student",
-          });
-        } catch {
-          // If insert is restricted by RLS, local storage cache ensures smooth functioning
+          }, { onConflict: "id" });
+        } catch (insErr) {
+          console.warn("Could not auto-provision student profile in Supabase:", insErr);
         }
         setUserRole("student");
         return "student";
       }
 
-      // If profile exists but display_name is empty (common in first-time OAuth), fill it in
-      if (!data.display_name && metaName) {
+      // If profile exists, ensure display_name, email, and avatar_url are populated
+      const updates: Record<string, string> = {};
+      if ((!data.display_name || data.display_name === "Student") && metaName) updates.display_name = metaName;
+      if (!data.email && user.email) updates.email = user.email;
+      if (!data.avatar_url && metaAvatar) updates.avatar_url = metaAvatar;
+
+      if (Object.keys(updates).length > 0) {
         try {
-          await client.from("profiles").update({ display_name: metaName, email: user.email }).eq("id", user.id);
+          await client.from("profiles").update(updates).eq("id", user.id);
         } catch {}
       }
 
-      const role = data.role === "admin" ? "admin" : "student";
-      setUserRole(role);
-      return role;
-    } catch {
+      setUserRole(targetRole);
+      return targetRole;
+    } catch (err) {
+      console.warn("Error in resolveUserRole:", err);
       setUserRole("student");
       return "student";
     }
@@ -1348,12 +1395,24 @@ function App() {
     // Seed initial history state so swipe back stays within the website
     const currentPath = window.location.pathname;
     const currentState = window.history.state as { page?: Page; isRoot?: boolean } | null;
+    const search = window.location.search;
+    const hash = window.location.hash;
+    const hasAuthParams =
+      search.includes("code=") ||
+      search.includes("error=") ||
+      search.includes("type=recovery") ||
+      hash.includes("access_token=") ||
+      hash.includes("error=");
+
     if (!currentState || !currentState.page) {
-      if (currentPath !== "/" && currentPath !== "") {
+      if (hasAuthParams) {
+        // Preserve OAuth callback and recovery parameters for Supabase auth handlers
+        window.history.replaceState({ page: "Home", isRoot: true, hasDetail: false }, "", currentPath + search + hash);
+      } else if (currentPath !== "/" && currentPath !== "") {
         window.history.replaceState({ page: "Home", isRoot: true }, "", "/");
-        window.history.pushState({ page, isRoot: false, hasDetail: false }, "", currentPath + window.location.search);
+        window.history.pushState({ page, isRoot: false, hasDetail: false }, "", currentPath + search + hash);
       } else {
-        window.history.replaceState({ page: "Home", isRoot: true, hasDetail: false }, "", "/");
+        window.history.replaceState({ page: "Home", isRoot: true, hasDetail: false }, "", "/" + search + hash);
       }
     }
   }, []);
@@ -1513,14 +1572,19 @@ function App() {
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const isRecoveryCallback = searchParams.get("type") === "recovery" || hashParams.get("type") === "recovery";
     const hasCode = searchParams.has("code") || hashParams.has("access_token");
-    const wasOAuth = sessionStorage.getItem("techcircuit_oauth_in_progress") === "true" || localStorage.getItem("techcircuit_oauth_in_progress") === "true";
+    const wasOAuth =
+      sessionStorage.getItem("techcircuit_oauth_in_progress") === "true" ||
+      localStorage.getItem("techcircuit_oauth_in_progress") === "true";
     let isOAuthCallback = !isRecoveryCallback && (hasCode || wasOAuth);
+    let isSubscribed = true;
 
     // Catch any OAuth redirect errors from Google / Supabase
     const oauthError = searchParams.get("error_description") || searchParams.get("error") || hashParams.get("error_description") || hashParams.get("error");
     if (oauthError) {
       sessionStorage.removeItem("techcircuit_oauth_in_progress");
       localStorage.removeItem("techcircuit_oauth_in_progress");
+      sessionStorage.removeItem("techcircuit_oauth_target_page");
+      localStorage.removeItem("techcircuit_oauth_target_page");
       const cleanUrl = ["/login", "/signin", "/student-login", "/auth"].includes(window.location.pathname.replace(/\/+$/, ""))
         ? "/"
         : window.location.pathname;
@@ -1529,11 +1593,15 @@ function App() {
     }
 
     async function handleAuthenticatedUser(user: User, fromOAuth: boolean) {
+      if (!isSubscribed) return;
       setCurrentUser(user);
       setUserRole((prev) => prev || "student");
       setAuthOpen(false);
 
-      const targetPage = localStorage.getItem("techcircuit_oauth_target_page") || sessionStorage.getItem("techcircuit_oauth_target_page");
+      const targetPage =
+        localStorage.getItem("techcircuit_oauth_target_page") ||
+        sessionStorage.getItem("techcircuit_oauth_target_page");
+
       if (fromOAuth) {
         sessionStorage.removeItem("techcircuit_oauth_in_progress");
         localStorage.removeItem("techcircuit_oauth_in_progress");
@@ -1545,6 +1613,7 @@ function App() {
       const isAuthPath = ["/login", "/signin", "/student-login", "/auth"].includes(currentPath);
       const isDashboardTarget = targetPage === "Dashboard" || currentPath === "/dashboard" || fromOAuth;
 
+      // Clean the URL history state without losing route context
       if (hasCode || isAuthPath || isDashboardTarget) {
         const cleanPath = isDashboardTarget
           ? "/dashboard"
@@ -1554,7 +1623,16 @@ function App() {
         window.history.replaceState({ page: isDashboardTarget ? "Dashboard" : "Home", isRoot: !isDashboardTarget, hasDetail: false }, document.title, cleanPath);
       }
 
+      // Transition to Dashboard immediately for OAuth sign-ins so the user never sees sign-in prompts
+      if (!isRecoveryCallback && (fromOAuth || isDashboardTarget)) {
+        if (currentPath !== "/checkout" && currentPath !== "/cart" && currentPath !== "/payment-result") {
+          setPage("Dashboard");
+          setStudentSection("overview");
+        }
+      }
+
       const role = await resolveUserRole(client, user);
+      if (!isSubscribed) return;
 
       if (isRecoveryCallback) {
         setAuthRecovery(true);
@@ -1575,7 +1653,8 @@ function App() {
       }
     }
 
-    void client.auth.getSession().then(({ data, error }) => {
+    client.auth.getSession().then(({ data, error }) => {
+      if (!isSubscribed) return;
       if (error) {
         setDataError("Could not restore your session.");
         return;
@@ -1583,12 +1662,16 @@ function App() {
       if (data.session?.user) {
         void handleAuthenticatedUser(data.session.user, isOAuthCallback);
       } else if (!hasCode && !wasOAuth) {
-        setCurrentUser(null);
-        setUserRole(null);
+        // Only reset if no active user has already been established
+        setCurrentUser((current) => current ? current : null);
+        setUserRole((prev) => prev ? prev : null);
       }
-    }).catch(() => setDataError("Could not restore your session."));
+    }).catch(() => {
+      if (isSubscribed) setDataError("Could not restore your session.");
+    });
 
     const { data: authListener } = client.auth.onAuthStateChange(async (event, session) => {
+      if (!isSubscribed) return;
       if (session?.user) {
         const justSignedIn = event === "SIGNED_IN" || isOAuthCallback || hasCode || wasOAuth;
         await handleAuthenticatedUser(session.user, justSignedIn);
@@ -1596,13 +1679,18 @@ function App() {
       } else if (event === "SIGNED_OUT") {
         setCurrentUser(null);
         setUserRole(null);
+        setStudentMenuOpen(false);
       }
       if (event === "PASSWORD_RECOVERY") {
         setAuthRecovery(true);
         setAuthOpen(true);
       }
     });
-    return () => authListener.subscription.unsubscribe();
+
+    return () => {
+      isSubscribed = false;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -2113,7 +2201,19 @@ function App() {
                 aria-expanded={studentMenuOpen}
                 aria-haspopup="menu"
               >
-                <span className="student-avatar">{userRole === "admin" ? <ShieldCheck size={11} /> : <UserRound size={11} />}</span>
+                <span className="student-avatar">
+                  {userRole === "admin" ? (
+                    <ShieldCheck size={11} />
+                  ) : (currentUser.user_metadata?.avatar_url || currentUser.user_metadata?.picture) ? (
+                    <img
+                      src={currentUser.user_metadata.avatar_url || currentUser.user_metadata.picture}
+                      alt=""
+                      style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover", display: "block" }}
+                    />
+                  ) : (
+                    <UserRound size={11} />
+                  )}
+                </span>
                 <span className="student-profile-label">
                   {userRole === "admin"
                     ? "Admin"
@@ -8018,36 +8118,23 @@ function StudentDashboard({
     const supabase = getSupabase();
     if (supabase) {
       try {
-        const { data, error } = await supabase
+        const { error } = await supabase
           .from("profiles")
-          .update({
+          .upsert({
+            id: currentStudent.id,
             display_name: profileName.trim(),
+            email: currentStudent.email || "",
+            avatar_url: (currentStudent.user_metadata?.avatar_url || currentStudent.user_metadata?.picture || "") as string,
             institution: institution.trim(),
             course: sanitizedCourse.trim(),
             academic_year: academicYear,
             city: location.trim(),
             interests,
-          })
-          .eq("id", currentStudent.id)
-          .select("id")
-          .maybeSingle();
+            role: "student",
+          }, { onConflict: "id" });
 
-        if (!error && !data) {
-          try {
-            await supabase
-              .from("profiles")
-              .insert({
-                id: currentStudent.id,
-                display_name: profileName.trim(),
-                email: currentStudent.email,
-                institution: institution.trim(),
-                course: sanitizedCourse.trim(),
-                academic_year: academicYear,
-                city: location.trim(),
-                interests,
-                role: "student",
-              });
-          } catch {}
+        if (error) {
+          console.warn("Supabase profile upsert note:", error.message);
         }
       } catch (err) {
         console.warn("Saved to local storage, server sync deferred:", err);
