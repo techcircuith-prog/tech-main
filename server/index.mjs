@@ -469,6 +469,7 @@ const server = createServer(async (request, response) => {
           payment_session_id: cfOrder.payment_session_id,
           payment_status: "PENDING",
           tracking_status: "Payment Pending",
+          whatsapp_opt_in: Boolean(body?.whatsapp_opt_in),
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           expected_delivery_date: null,
@@ -479,6 +480,44 @@ const server = createServer(async (request, response) => {
         ordersStore.set(cashfreeOrderId, orderRecord);
         ordersStore.set(orderNumber, orderRecord);
         persistData();
+
+        // Also write initial order record to Supabase if configured
+        if (supabaseUrl && supabaseKey) {
+          try {
+            await fetch(`${supabaseUrl}/rest/v1/orders`, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                apikey: supabaseKey,
+                authorization: `Bearer ${supabaseKey}`,
+                prefer: "resolution=merge-duplicates,return=representation",
+              },
+              body: JSON.stringify({
+                id: internalOrderId,
+                order_number: orderNumber,
+                user_id: body.userId || null,
+                customer_name: customer.name,
+                customer_email: customer.email,
+                customer_phone: customer.phone,
+                shipping_address: shippingAddress,
+                items: orderRecord.items,
+                subtotal,
+                shipping_charges: shippingCharges,
+                total_amount: totalAmount,
+                currency: "INR",
+                payment_method: orderRecord.payment_method,
+                payment_gateway: "cashfree",
+                cashfree_order_id: cashfreeOrderId,
+                payment_session_id: cfOrder.payment_session_id,
+                payment_status: "PENDING",
+                tracking_status: "Payment Pending",
+                whatsapp_opt_in: Boolean(body?.whatsapp_opt_in),
+              }),
+            });
+          } catch (sbErr) {
+            console.warn("Supabase order initial write error in server:", sbErr.message);
+          }
+        }
 
         // Return only payment_session_id and order IDs
         sendJson(response, 201, {
@@ -844,6 +883,25 @@ const server = createServer(async (request, response) => {
         if (merged.cashfree_order_id) ordersStore.set(merged.cashfree_order_id, merged);
         if (merged.order_number) ordersStore.set(merged.order_number, merged);
         persistData();
+
+        // Also sync order to Supabase if configured
+        if (supabaseUrl && supabaseKey) {
+          try {
+            await fetch(`${supabaseUrl}/rest/v1/orders`, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                apikey: supabaseKey,
+                authorization: `Bearer ${supabaseKey}`,
+                prefer: "resolution=merge-duplicates,return=representation",
+              },
+              body: JSON.stringify(merged),
+            });
+          } catch (sbErr) {
+            console.warn("Supabase order sync error in server:", sbErr.message);
+          }
+        }
+
         sendJson(response, 200, { ok: true, order: merged }, request);
       } catch (e) {
         sendJson(response, 500, { error: e.message || "Failed to save order." }, request);

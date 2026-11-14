@@ -366,6 +366,7 @@ interface AdminOrder {
   courier_tracking_url?: string;
   admin_notes?: string;
   public_notes?: string;
+  whatsapp_opt_in?: boolean;
   status_history?: OrderStatusHistory[];
   created_at: string;
   updated_at: string;
@@ -1532,6 +1533,7 @@ function App() {
             payment_method: resolvedMethod === "card" ? "card" : "upi",
             payment_status: "PAID",
             tracking_status: ord.tracking_status || "Order Placed",
+            whatsapp_opt_in: ord.whatsapp_opt_in !== undefined ? Boolean(ord.whatsapp_opt_in) : Boolean(lastCheckout?.whatsapp_opt_in),
             created_at: ord.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
             expected_delivery_date: ord.expected_delivery_date || new Date(Date.now() + 7 * 86400000).toISOString(),
@@ -4298,6 +4300,7 @@ function ProjectCheckoutPage({
   const [state, setState] = useState("Tamil Nadu");
   const [pincode, setPincode] = useState("");
   const [saveForFuture, setSaveForFuture] = useState(true);
+  const [whatsappOptIn, setWhatsappOptIn] = useState(false);
 
   // Payment fields
   const [paymentMethod, setPaymentMethod] = useState<"qr" | "card" | "upi">("qr");
@@ -4735,6 +4738,7 @@ function ProjectCheckoutPage({
           userId: currentUser?.id || "",
           shippingAddress: shippingAddressPayload,
           paymentMethod,
+          whatsapp_opt_in: Boolean(whatsappOptIn),
         }),
       });
 
@@ -4764,6 +4768,7 @@ function ProjectCheckoutPage({
           shippingAddress: shippingAddressPayload,
           paymentMethod: normalizedMethod,
           total,
+          whatsapp_opt_in: Boolean(whatsappOptIn),
           timestamp: Date.now(),
         }));
         localStorage.setItem("techcircuit-customer-email", shippingAddressPayload.email);
@@ -5009,6 +5014,7 @@ function ProjectCheckoutPage({
       payment_method: orderObj.payment_method || paymentMethod,
       payment_status: "PAID",
       tracking_status: orderObj.tracking_status || "Order Placed",
+      whatsapp_opt_in: Boolean(whatsappOptIn),
       created_at: orderObj.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
       expected_delivery_date: orderObj.expected_delivery_date || new Date(Date.now() + 7 * 86400000).toISOString(),
@@ -5072,6 +5078,7 @@ function ProjectCheckoutPage({
           payment_method: fullOrderToSave.payment_method,
           payment_status: "PAID",
           tracking_status: "Order Placed",
+          whatsapp_opt_in: Boolean(fullOrderToSave.whatsapp_opt_in),
           created_at: fullOrderToSave.created_at,
           updated_at: fullOrderToSave.updated_at,
           expected_delivery_date: fullOrderToSave.expected_delivery_date,
@@ -5788,6 +5795,21 @@ function ProjectCheckoutPage({
                           onChange={(e) => setSaveForFuture(e.target.checked)}
                         />
                         <span>Save this address for future orders</span>
+                      </label>
+
+                      {/* WhatsApp Notification Opt-in */}
+                      <label className="checkout-whatsapp-optin-strip" htmlFor="checkout-whatsapp-opt-in">
+                        <input
+                          id="checkout-whatsapp-opt-in"
+                          name="whatsapp_opt_in"
+                          type="checkbox"
+                          className="checkout-whatsapp-checkbox"
+                          checked={whatsappOptIn}
+                          onChange={(e) => setWhatsappOptIn(e.target.checked)}
+                        />
+                        <span className="checkout-whatsapp-optin-text">
+                          I agree to receive order confirmation and delivery updates on WhatsApp.
+                        </span>
                       </label>
 
                       {/* Action Button */}

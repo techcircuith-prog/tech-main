@@ -215,6 +215,7 @@ export default async function handler(req, res) {
             payment_session_id: cfData.payment_session_id,
             payment_status: "PENDING",
             tracking_status: "Payment Pending",
+            whatsapp_opt_in: Boolean(body.whatsapp_opt_in),
           }),
         });
       } catch (sbErr) {

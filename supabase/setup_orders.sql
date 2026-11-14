@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS public.orders (
   payment_signature TEXT,
   payment_status TEXT NOT NULL DEFAULT 'PENDING',
   tracking_status TEXT NOT NULL DEFAULT 'Order Placed',
+  whatsapp_opt_in BOOLEAN NOT NULL DEFAULT FALSE,
   paid_at TIMESTAMPTZ,
   expected_delivery_date TIMESTAMPTZ,
   courier_name TEXT,
