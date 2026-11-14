@@ -1,3 +1,5 @@
+import { triggerWhatsAppNotification } from "../_utils/whatsapp.js";
+
 const FALLBACK_SUPABASE_URL = "https://zomwoprlbydezbbliyui.supabase.co";
 const FALLBACK_SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvbXdvcHJsYnlkZXpiYmxpeXVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4OTQ0MTEsImV4cCI6MjEwNzQ3MDQxMX0.ZsmboSVX_kN4J79tIbZBIbdFMIOijyhfqcayAbGHlt4";
@@ -41,6 +43,30 @@ export default async function handler(req, res) {
       let updatedOrder = null;
       if (supabaseUrl && supabaseKey && order_id) {
         try {
+          // Check previous tracking status to ensure this is a genuine transition to Delivered
+          let previousStage = null;
+          if (to_stage === "Delivered") {
+            try {
+              const preCheckRes = await fetch(
+                `${supabaseUrl}/rest/v1/orders?id=eq.${encodeURIComponent(order_id)}&select=id,tracking_status`,
+                {
+                  headers: {
+                    apikey: supabaseKey,
+                    authorization: `Bearer ${supabaseKey}`,
+                  },
+                }
+              );
+              if (preCheckRes.ok) {
+                const currentList = await preCheckRes.json();
+                if (Array.isArray(currentList) && currentList.length > 0) {
+                  previousStage = currentList[0].tracking_status;
+                }
+              }
+            } catch (preErr) {
+              console.warn("Could not pre-check order stage in /api/orders fallback:", preErr.message);
+            }
+          }
+
           const patchData = {
             tracking_status: to_stage,
             updated_at: new Date().toISOString(),
@@ -81,6 +107,18 @@ export default async function handler(req, res) {
               is_public: true,
             }),
           });
+
+          // Trigger order_delivered fallback only on a genuine transition to Delivered
+          const isGenuineDeliveredTransition = to_stage === "Delivered" && previousStage !== "Delivered";
+          if (isGenuineDeliveredTransition && updatedOrder) {
+            await triggerWhatsAppNotification({
+              supabaseUrl,
+              supabaseKey,
+              orderId: order_id,
+              eventType: "order_delivered",
+              dryRun: true,
+            });
+          }
         } catch (err) {
           console.error("Supabase stage update error in /api/orders:", err);
         }

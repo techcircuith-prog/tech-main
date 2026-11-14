@@ -1,3 +1,5 @@
+import { triggerWhatsAppNotification } from "../_utils/whatsapp.js";
+
 export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
@@ -110,6 +112,15 @@ export default async function handler(req, res) {
           const patchedList = await patchRes.json();
           if (Array.isArray(patchedList) && patchedList.length > 0) {
             savedOrder = patchedList[0];
+
+            // Trigger order_confirmation only after Cashfree payment is verified as PAID and DB update succeeds
+            await triggerWhatsAppNotification({
+              supabaseUrl,
+              supabaseKey,
+              orderId: savedOrder.id || orderId,
+              eventType: "order_confirmation",
+              dryRun: true,
+            });
           }
         }
       } catch (err) {
