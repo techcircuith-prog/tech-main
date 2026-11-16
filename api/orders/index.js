@@ -111,13 +111,19 @@ export default async function handler(req, res) {
           // Trigger order_delivered fallback only on a genuine transition to Delivered
           const isGenuineDeliveredTransition = to_stage === "Delivered" && previousStage !== "Delivered";
           if (isGenuineDeliveredTransition && updatedOrder) {
-            await triggerWhatsAppNotification({
-              supabaseUrl,
-              supabaseKey,
-              orderId: order_id,
-              eventType: "order_delivered",
-              dryRun: true,
-            });
+            // Trigger order_delivered notification. Awaited within serverless lifecycle to prevent termination;
+            // errors are safely caught so stage update is never invalidated.
+            try {
+              await triggerWhatsAppNotification({
+                supabaseUrl,
+                supabaseKey,
+                orderId: order_id,
+                eventType: "order_delivered",
+                dryRun: true,
+              });
+            } catch (notifyErr) {
+              console.warn("[WhatsApp Trigger Error]:", notifyErr?.message || notifyErr);
+            }
           }
         } catch (err) {
           console.error("Supabase stage update error in /api/orders:", err);

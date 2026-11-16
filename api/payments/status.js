@@ -113,14 +113,19 @@ export default async function handler(req, res) {
           if (Array.isArray(patchedList) && patchedList.length > 0) {
             savedOrder = patchedList[0];
 
-            // Trigger order_confirmation only after Cashfree payment is verified as PAID and DB update succeeds
-            await triggerWhatsAppNotification({
-              supabaseUrl,
-              supabaseKey,
-              orderId: savedOrder.id || orderId,
-              eventType: "order_confirmation",
-              dryRun: true,
-            });
+            // Trigger order_confirmation only after Cashfree payment is verified as PAID and DB update succeeds.
+            // Awaited within serverless lifecycle to prevent termination; errors are safely caught so payment update is never invalidated.
+            try {
+              await triggerWhatsAppNotification({
+                supabaseUrl,
+                supabaseKey,
+                orderId: savedOrder.id || orderId,
+                eventType: "order_confirmation",
+                dryRun: true,
+              });
+            } catch (notifyErr) {
+              console.warn("[WhatsApp Trigger Error]:", notifyErr?.message || notifyErr);
+            }
           }
         }
       } catch (err) {
