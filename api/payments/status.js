@@ -115,16 +115,20 @@ export default async function handler(req, res) {
 
             // Trigger order_confirmation only after Cashfree payment is verified as PAID and DB update succeeds.
             // Awaited within serverless lifecycle to prevent termination; errors are safely caught so payment update is never invalidated.
-            try {
-              await triggerWhatsAppNotification({
-                supabaseUrl,
-                supabaseKey,
-                orderId: savedOrder.id || orderId,
-                eventType: "order_confirmation",
-                dryRun: true,
-              });
-            } catch (notifyErr) {
-              console.warn("[WhatsApp Trigger Error]:", notifyErr?.message || notifyErr);
+            if (savedOrder.whatsapp_opt_in === true) {
+              try {
+                await triggerWhatsAppNotification({
+                  supabaseUrl,
+                  supabaseKey,
+                  orderId: savedOrder.id || orderId,
+                  eventType: "order_confirmation",
+                  dryRun: false,
+                });
+              } catch (notifyErr) {
+                console.warn("[WhatsApp Trigger Error]:", notifyErr?.message || notifyErr);
+              }
+            } else {
+              console.log(`[WhatsApp Trigger Skipped] Customer opted out (whatsapp_opt_in is not true) for order ${savedOrder.id || orderId}`);
             }
           }
         }

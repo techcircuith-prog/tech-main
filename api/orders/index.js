@@ -111,18 +111,22 @@ export default async function handler(req, res) {
           // Trigger order_delivered fallback only on a genuine transition to Delivered
           const isGenuineDeliveredTransition = to_stage === "Delivered" && previousStage !== "Delivered";
           if (isGenuineDeliveredTransition && updatedOrder) {
-            // Trigger order_delivered notification. Awaited within serverless lifecycle to prevent termination;
-            // errors are safely caught so stage update is never invalidated.
-            try {
-              await triggerWhatsAppNotification({
-                supabaseUrl,
-                supabaseKey,
-                orderId: order_id,
-                eventType: "order_delivered",
-                dryRun: true,
-              });
-            } catch (notifyErr) {
-              console.warn("[WhatsApp Trigger Error]:", notifyErr?.message || notifyErr);
+            // Trigger order_delivered notification only for customers with verified opt-in.
+            // Awaited within serverless lifecycle to prevent termination; errors are safely caught so stage update is never invalidated.
+            if (updatedOrder.whatsapp_opt_in === true) {
+              try {
+                await triggerWhatsAppNotification({
+                  supabaseUrl,
+                  supabaseKey,
+                  orderId: order_id,
+                  eventType: "order_delivered",
+                  dryRun: false,
+                });
+              } catch (notifyErr) {
+                console.warn("[WhatsApp Trigger Error]:", notifyErr?.message || notifyErr);
+              }
+            } else {
+              console.log(`[WhatsApp Trigger Skipped] Customer opted out (whatsapp_opt_in is not true) for order ${order_id}`);
             }
           }
         } catch (err) {
