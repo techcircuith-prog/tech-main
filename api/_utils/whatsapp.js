@@ -11,7 +11,7 @@ const FALLBACK_SUPABASE_URL = "https://zomwoprlbydezbbliyui.supabase.co";
  * 
  * Guarantees:
  * - Awaited directly to prevent silent execution termination in serverless environments (e.g. Vercel).
- * - Enforces a strict 2000ms timeout via AbortController to avoid delaying parent responses excessively.
+ * - Enforces a strict 4000ms timeout via AbortController to avoid delaying parent responses excessively.
  * - Uses server environment variables ONLY (process.env.SUPABASE_SERVICE_ROLE_KEY).
  *   Zero hardcoded secrets in source files.
  * - All errors and timeouts are caught and logged safely without exposing secrets.
@@ -54,7 +54,7 @@ export async function triggerWhatsAppNotification({
 
   const endpoint = `${resolvedUrl}/functions/v1/send-whatsapp`;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 2000);
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
 
   try {
     const response = await fetch(endpoint, {
@@ -93,7 +93,7 @@ export async function triggerWhatsAppNotification({
     clearTimeout(timeoutId);
 
     if (err?.name === "AbortError") {
-      console.warn(`[WhatsApp Trigger Timeout] Request timed out after 2000ms for ${eventType} on order ${orderId}`);
+      console.warn(`[WhatsApp Trigger Timeout] Request timed out after 4000ms for ${eventType} on order ${orderId}`);
       return { success: false, error: "timeout" };
     }
 
