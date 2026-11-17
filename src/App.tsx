@@ -9572,44 +9572,56 @@ function AdminPage({
         admin_name: adminEmail || "Administrator",
       };
 
-      // 1. Direct Supabase update for immediate database persistence
-      const client = supabase || getSupabase();
-      if (client && targetOrderId) {
-        try {
-          const patchObj: Record<string, any> = {
-            tracking_status: stageToApply,
-            updated_at: new Date().toISOString(),
-          };
-          if (courierNameInput.trim()) patchObj.courier_name = courierNameInput.trim();
-          if (courierTrackingNumberInput.trim()) patchObj.courier_tracking_number = courierTrackingNumberInput.trim();
-          if (courierTrackingUrlInput.trim()) patchObj.courier_tracking_url = courierTrackingUrlInput.trim();
-          if (expectedDateInput) patchObj.expected_delivery_date = expectedDateInput;
-          if (internalNotesInput.trim()) patchObj.admin_notes = internalNotesInput.trim();
-
-          await client.from("orders").update(patchObj).eq("id", targetOrderId);
-          await client.from("order_status_history").insert({
-            order_id: targetOrderId,
-            from_stage: selectedAdminOrder.tracking_status,
-            to_stage: stageToApply,
-            changed_by: adminEmail || "Administrator",
-            note: stageNote.trim() || `Stage updated to ${stageToApply}`,
-            is_public: true,
-          });
-        } catch (sErr) {
-          console.warn("Direct Supabase tracking update note:", sErr);
-        }
-      }
-
-      // 2. Call serverless endpoint (/api/orders/stage) with fallback to (/api/orders)
+      // 1. Call serverless endpoint (/api/orders/stage) first so the backend detects
+      // genuine stage transitions (e.g., Delivered) before mutating the database.
+      // Only fall back to (/api/orders) when /api/orders/stage returns HTTP 404 or 405.
+      const unconfirmedErrorMessage =
+        "Could not confirm order stage update. Please refresh and check current status before retrying.";
       let apiReturnedOrder: AdminOrder | null = null;
+      let apiSucceeded = false;
+
+      let primaryRes: Response;
       try {
-        const res = await fetch("/api/orders/stage", {
+        primaryRes = await fetch("/api/orders/stage", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(stagePayload),
         });
+      } catch {
+        throw new Error(unconfirmedErrorMessage);
+      }
 
-        const rawText = await res.text();
+      if (primaryRes.status === 404 || primaryRes.status === 405) {
+        // Fallback call to /api/orders ONLY on HTTP 404 or 405
+        let fallbackRes: Response;
+        try {
+          fallbackRes = await fetch("/api/orders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "update_stage", ...stagePayload }),
+          });
+        } catch {
+          throw new Error(unconfirmedErrorMessage);
+        }
+
+        const fbText = await fallbackRes.text();
+        let fbData: any = null;
+        try {
+          fbData = fbText ? JSON.parse(fbText) : null;
+        } catch {
+          fbData = null;
+        }
+
+        if (fallbackRes.status === 400 && fbData?.error) {
+          throw new Error(fbData.error);
+        }
+
+        if (fallbackRes.ok && fbData?.order?.id && fbData.order.tracking_status === stageToApply) {
+          apiSucceeded = true;
+          apiReturnedOrder = fbData.order;
+        }
+      } else {
+        const rawText = await primaryRes.text();
         let data: any = null;
         try {
           data = rawText ? JSON.parse(rawText) : null;
@@ -9617,42 +9629,24 @@ function AdminPage({
           data = null;
         }
 
-        if (!res.ok && data?.error) {
+        if (primaryRes.status === 400 && data?.error) {
           throw new Error(data.error);
         }
-        if (data?.order) {
+
+        if (primaryRes.ok && data?.order?.id && data.order.tracking_status === stageToApply) {
+          apiSucceeded = true;
           apiReturnedOrder = data.order;
         }
-      } catch (apiErr) {
-        // Fallback call to /api/orders
-        try {
-          const fallbackRes = await fetch("/api/orders", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "update_stage", ...stagePayload }),
-          });
-          const fbText = await fallbackRes.text();
-          let fbData: any = null;
-          try {
-            fbData = fbText ? JSON.parse(fbText) : null;
-          } catch {}
-          if (fbData?.order) apiReturnedOrder = fbData.order;
-        } catch {}
       }
 
-      // 3. Keep selected order updated without wiping out existing details
-      const updatedOrderRecord: AdminOrder = apiReturnedOrder || {
-        ...selectedAdminOrder,
-        tracking_status: stageToApply,
-        courier_name: courierNameInput.trim() || selectedAdminOrder.courier_name,
-        courier_tracking_number: courierTrackingNumberInput.trim() || selectedAdminOrder.courier_tracking_number,
-        courier_tracking_url: courierTrackingUrlInput.trim() || selectedAdminOrder.courier_tracking_url,
-        expected_delivery_date: expectedDateInput || selectedAdminOrder.expected_delivery_date,
-        admin_notes: internalNotesInput.trim() || selectedAdminOrder.admin_notes,
-        updated_at: new Date().toISOString(),
-      };
+      if (!apiSucceeded || !apiReturnedOrder) {
+        throw new Error(unconfirmedErrorMessage);
+      }
 
-      // 4. Update localStorage cache
+      // 2. Keep selected order updated with confirmed server record
+      const updatedOrderRecord: AdminOrder = apiReturnedOrder;
+
+      // 3. Update localStorage cache
       try {
         const raw = localStorage.getItem("techcircuit_orders_store");
         if (raw) {
