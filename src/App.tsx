@@ -1560,8 +1560,12 @@ function App() {
             localStorage.setItem("techcircuit_orders_store", JSON.stringify(filtered));
           } catch {}
 
+          // Clear consumed checkout snapshot only after payment is verified and fullOrd is captured
+          try {
+            localStorage.removeItem("techcircuit_last_checkout");
+          } catch {}
+
           setReturnConfirmedOrder(fullOrd);
-          setActiveTrackingOrder(fullOrd);
           setPage("Checkout");
           showToast("Payment Successful! Your order has been placed.", "success");
         } else {
@@ -1574,12 +1578,11 @@ function App() {
     void verifyReturnPayment();
   }, [returnOrderId]);
 
-  function viewOrderDetails(order: AdminOrder) {
-    if (order.payment_status?.toUpperCase() !== "PAID") return;
-    setActiveTrackingOrder(order);
+  function openMyOrders() {
+    setReturnConfirmedOrder(null);
+    setActiveTrackingOrder(null);
     setStudentSection("orders");
-    setPage("Dashboard");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    navigate("Dashboard");
   }
 
   useEffect(() => {
@@ -1967,6 +1970,9 @@ function App() {
   }, []);
 
   function navigate(next: Page, push: boolean = true) {
+    if (next !== "Checkout" && next !== "PaymentResult") {
+      setReturnConfirmedOrder(null);
+    }
     if (push && next !== page) {
       navigationHistoryRef.current.push(page);
       const nextPath = getPathFromPage(next);
@@ -2042,7 +2048,9 @@ function App() {
         isRoot?: boolean;
       } | null;
 
+      let resolvedPage: Page | null = null;
       if (state && state.page) {
+        resolvedPage = state.page;
         setPage(state.page);
         if (state.hasDetail && state.detailId) {
           if (state.detailType === "listing") {
@@ -2063,14 +2071,19 @@ function App() {
           if (currentUser) {
             setAuthOpen(false);
           } else {
+            resolvedPage = "Home";
             setPage("Home");
             setAuthOpen(true);
           }
         } else {
           const inferred = getPageFromPath(window.location.pathname);
+          resolvedPage = inferred;
           setPage(inferred);
         }
         setDetailSelection(null);
+      }
+      if (resolvedPage && resolvedPage !== "Checkout" && resolvedPage !== "PaymentResult") {
+        setReturnConfirmedOrder(null);
       }
       setAuthOpen(false);
       setMenuOpen(false);
@@ -2162,6 +2175,7 @@ function App() {
   }
 
   function openProjectCustomization(item: Listing) {
+    setReturnConfirmedOrder(null);
     setCustomizationRequestId(item.id);
     setDetailSelection(null);
     setPage("Projects");
@@ -2432,7 +2446,17 @@ function App() {
           />
         )
       ) : page === "Cart" ? (
-        <ProjectCartPage listings={listings} cartIds={cartIds} removeProject={removeProjectFromCart} onCheckout={() => navigate("Checkout")} onContinueShopping={() => navigate("Projects")} onViewListing={openListingDetails} />
+        <ProjectCartPage
+          listings={listings}
+          cartIds={cartIds}
+          removeProject={removeProjectFromCart}
+          onCheckout={() => {
+            setReturnConfirmedOrder(null);
+            navigate("Checkout");
+          }}
+          onContinueShopping={() => navigate("Projects")}
+          onViewListing={openListingDetails}
+        />
       ) : page === "Checkout" || page === "PaymentResult" ? (
         <ProjectCheckoutPage
           listings={listings}
@@ -2443,7 +2467,7 @@ function App() {
           navigate={navigate}
           onBackToCart={() => navigate("Cart")}
           initialConfirmedOrder={returnConfirmedOrder}
-          onViewOrderDetails={viewOrderDetails}
+          onViewMyOrders={openMyOrders}
         />
       ) : page === "Saved" ? (
         <SavedPage listings={listings} savedIds={savedIds} toggleSaved={toggleSaved} setEnquiry={setEnquiry} addProjectToCart={addProjectToCart} onViewListing={openListingDetails} onViewResource={openResourceDetails} />
@@ -4268,7 +4292,7 @@ function ProjectCheckoutPage({
   navigate,
   onBackToCart,
   initialConfirmedOrder,
-  onViewOrderDetails,
+  onViewMyOrders,
 }: {
   listings: Listing[];
   cartIds: string[];
@@ -4278,7 +4302,7 @@ function ProjectCheckoutPage({
   navigate?: (page: Page) => void;
   onBackToCart: () => void;
   initialConfirmedOrder?: AdminOrder | null;
-  onViewOrderDetails?: (order: AdminOrder) => void;
+  onViewMyOrders?: () => void;
 }) {
   const [step, setStep] = useState<CheckoutStep>(() => initialConfirmedOrder ? "confirmation" : "delivery");
   const [addressMode, setAddressMode] = useState<"saved" | "new">("saved");
@@ -4313,9 +4337,7 @@ function ProjectCheckoutPage({
   const [upiAwaiting, setUpiAwaiting] = useState(false);
   const [upiTimer, setUpiTimer] = useState(300);
 
-  // Zepto / Redbus style countdown & copy state
-  const [detailCountdown, setDetailCountdown] = useState(5);
-  const [countdownPaused, setCountdownPaused] = useState(false);
+  // Copy Order ID state
   const [copiedOrderId, setCopiedOrderId] = useState(false);
 
   // Cashfree Element references
@@ -4465,22 +4487,9 @@ function ProjectCheckoutPage({
     }
   }, [initialConfirmedOrder, listings]);
 
-  useEffect(() => {
-    if (step !== "confirmation" || countdownPaused) return;
-    if (detailCountdown <= 0) {
-      goToOrderDetails();
-      return;
-    }
-    const timer = setTimeout(() => {
-      setDetailCountdown((c) => c - 1);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [step, detailCountdown, countdownPaused]);
-
-  function goToOrderDetails() {
-    setCountdownPaused(true);
-    if (confirmedOrder && onViewOrderDetails) {
-      onViewOrderDetails(confirmedOrder);
+  function goToMyOrders() {
+    if (onViewMyOrders) {
+      onViewMyOrders();
     } else if (navigate) {
       navigate("Dashboard");
     }
@@ -5293,36 +5302,9 @@ function ProjectCheckoutPage({
   return (
     <main className="checkout-experience-page">
       <div className="checkout-page-container">
-        {/* Step 4: Zepto / Redbus / Aha Order Confirmation View */}
+        {/* Step 4: Order Confirmation & Receipt View */}
         {step === "confirmation" ? (
           <section className="order-confirmation-view">
-            {/* Zepto-Style Auto Navigation Banner */}
-            <div className="zepto-autonav-banner">
-              <div className="zepto-autonav-text">
-                <Sparkles size={18} color="#EA580C" />
-                <span>
-                  Order Confirmed! Directing you to Live Order Details in{" "}
-                  <strong style={{ color: "#EA580C" }}>{detailCountdown}s</strong>
-                </span>
-              </div>
-              <div className="zepto-autonav-actions">
-                <button
-                  type="button"
-                  className="zepto-autonav-btn-primary"
-                  onClick={goToOrderDetails}
-                >
-                  <PackageCheck size={14} /> View Details Now <ArrowRight size={13} />
-                </button>
-                <button
-                  type="button"
-                  className="zepto-autonav-btn-ghost"
-                  onClick={() => setCountdownPaused((p) => !p)}
-                >
-                  {countdownPaused ? "Resume Countdown" : "Stay on Receipt"}
-                </button>
-              </div>
-            </div>
-
             {/* Glowing Emerald Celebration Checkmark */}
             <div className="order-confirm-badge-icon">
               <CheckCircle2 size={40} />
@@ -5459,9 +5441,9 @@ function ProjectCheckoutPage({
                 type="button"
                 className="checkout-primary-pill-btn"
                 style={{ width: "auto", padding: "0 32px" }}
-                onClick={goToOrderDetails}
+                onClick={goToMyOrders}
               >
-                <PackageCheck size={18} /> View Order Details &amp; Live Build Tracking
+                <PackageCheck size={18} /> My Orders <ArrowRight size={16} />
               </button>
               <button
                 type="button"
